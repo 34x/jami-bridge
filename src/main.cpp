@@ -29,6 +29,7 @@
 #include <thread>
 #include <chrono>
 #include <atomic>
+#include <sys/stat.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -43,6 +44,63 @@ static std::atomic<bool> g_running{true};
 
 static void signal_handler(int) {
     g_running = false;
+}
+
+/// Check if a file exists (regular file).
+static bool file_exists(const std::string& path) {
+    struct stat st;
+    return stat(path.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+/// Wait for a newly created account's Jami URI to become available.
+/// The URI is assigned asynchronously after the DHT registers.
+/// Returns the URI, or empty string on timeout.
+static std::string wait_for_jami_uri(jami::Client& client,
+                                      const std::string& account_id,
+                                      int timeout_ms = 10000) {
+    auto start = std::chrono::steady_clock::now();
+    while (true) {
+        auto vdetails = client.account_volatile_details(account_id);
+        std::string username = vdetails.count("Account.username") ? vdetails["Account.username"] : "";
+        if (!username.empty()) return username;
+
+        auto details = client.account_details(account_id);
+        username = details.count("Account.username") ? details["Account.username"] : "";
+        if (!username.empty()) return username;
+
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start).count();
+        if (elapsed >= timeout_ms) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+    return "";
+}
+
+/// Print the bot identity line with the Jami URI.
+/// Waits briefly for the URI if it's not immediately available.
+static void print_bot_identity(jami::Client& client, const std::string& account_id) {
+    auto details = client.account_details(account_id);
+    std::string alias = details.count("Account.alias") ? details["Account.alias"] : "";
+
+    // Try volatile details first (populated after registration)
+    auto vdetails = client.account_volatile_details(account_id);
+    std::string username = vdetails.count("Account.username") ? vdetails["Account.username"] : "";
+
+    // Fall back to static details
+    if (username.empty()) {
+        username = details.count("Account.username") ? details["Account.username"] : "";
+    }
+
+    // If still empty, wait for registration (up to 10s)
+    if (username.empty()) {
+        std::cerr << "[jami-sdk] Waiting for Jami URI..." << std::endl;
+        username = wait_for_jami_uri(client, account_id);
+    }
+
+    std::cerr << "[jami-sdk] Bot identity: " << username
+              << " (account: " << account_id
+              << ", alias: " << alias << ")" << std::endl;
+    std::cerr << "[jami-sdk] Add this bot to a group: invite " << username << std::endl;
 }
 
 /// Resolve which account to use based on config.
@@ -73,19 +131,39 @@ static std::string resolve_account(jami::Client& client, const jami::Config& cfg
         return "";
     }
 
-    // Import account from archive
+    // Import account from archive (path exists)
     if (!cfg.account.empty() && (cfg.account.find("archive://") == 0 || cfg.account[0] == '/')) {
         std::string path = cfg.account.find("archive://") == 0
             ? cfg.account.substr(10)
             : cfg.account;
-        std::cerr << "[jami-sdk] Importing account from: " << path << std::endl;
-        std::string account_id = client.import_account(path, cfg.account_password);
-        if (account_id.empty()) {
-            std::cerr << "[jami-sdk] Error: Failed to import account" << std::endl;
-            return "";
+
+        if (file_exists(path)) {
+            // Existing archive — import it
+            std::cerr << "[jami-sdk] Importing account from: " << path << std::endl;
+            std::string account_id = client.import_account(path, cfg.account_password);
+            if (account_id.empty()) {
+                std::cerr << "[jami-sdk] Error: Failed to import account" << std::endl;
+                return "";
+            }
+            std::cerr << "[jami-sdk] Imported account: " << account_id << std::endl;
+            return account_id;
+        } else {
+            // Path doesn't exist — create new account and export it
+            std::cerr << "[jami-sdk] Creating new account (archive will be saved to: " << path << ")" << std::endl;
+            std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
+            std::cerr << "[jami-sdk] Created account: " << account_id << std::endl;
+
+            // Wait for the account to be ready before exporting
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+
+            bool exported = client.export_account(account_id, path, cfg.account_password);
+            if (exported) {
+                std::cerr << "[jami-sdk] Account exported to: " << path << std::endl;
+            } else {
+                std::cerr << "[jami-sdk] Warning: Failed to export account to " << path << std::endl;
+            }
+            return account_id;
         }
-        std::cerr << "[jami-sdk] Imported account: " << account_id << std::endl;
-        return account_id;
     }
 
     // Create new account explicitly requested
@@ -539,13 +617,7 @@ int main(int argc, char* argv[]) {
 
         // Display the bot's Jami identity for easy invites
         if (!resolved_account_id.empty()) {
-            auto details = client.account_details(resolved_account_id);
-            std::string username = details.count("Account.username") ? details["Account.username"] : "";
-            std::string alias = details.count("Account.alias") ? details["Account.alias"] : "";
-            std::cerr << "[jami-sdk] Bot identity: " << username
-                      << " (account: " << resolved_account_id
-                      << ", alias: " << alias << ")" << std::endl;
-            std::cerr << "[jami-sdk] Add this bot to a group: invite " << username << std::endl;
+            print_bot_identity(client, resolved_account_id);
         }
     }
 

@@ -39,7 +39,8 @@ void Config::print_usage(const char* prog) const {
               << "  --account SPEC       Account to use (default: auto-detect)\n"
               << "                         ID: use existing account (hex string)\n"
               << "                         archive:///path: import from archive file\n"
-              << "                         /path/to/account.gz: import from archive\n"
+              << "                         /path/to/file.gz: import if exists,\n"
+              << "                                           create+export if not\n"
               << "                         new: create a new account\n"
               << "                         (empty): use first existing, or create new\n"
               << "  --account-alias NAME  Alias for new/created accounts (default: bot)\n"
@@ -376,15 +377,12 @@ int Config::validate() const {
                 std::cerr << "Error: Account archive not found: " << path << std::endl;
                 return 1;
             }
-        } else if (account[0] == '/') {
-            // Absolute path — treat as archive
-            std::ifstream test(account);
-            if (!test.is_open()) {
-                std::cerr << "Error: Account archive not found: " << account << std::endl;
-                return 1;
-            }
         }
-        // Otherwise it's an account ID (hex string) — validated later
+        // Note: bare paths like /path/to/file.gz are allowed to not exist.
+        // If the file exists, the account will be imported.
+        // If it doesn't, a new account will be created and exported to that path.
+        // This enables the create-or-reuse pattern:
+        //   jami-sdk --account /tmp/bot.gz  (first run: create, subsequent: import)
     }
 
     return 0;

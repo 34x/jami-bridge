@@ -399,7 +399,7 @@ The `--account` flag controls which Jami account the SDK uses:
 | `<account-id>` | Use specific account by ID |
 | `new` | Always create a new account |
 | `archive:///path/to/file.gz` | Import account from archive |
-| `/path/to/account.gz` | Import from file (shorthand) |
+| `/path/to/file.gz` | Import if file exists; create new + export if not |
 
 ```bash
 # Auto-detect (use existing or create new)
@@ -409,10 +409,13 @@ The `--account` flag controls which Jami account the SDK uses:
 ./jami-sdk --account <account-id>
 
 # Import from archive (backup file from Jami desktop app)
-./jami-sdk --account archive:///home/user/jami-backup.gz
+./jami-sdk --account archive:///path/to/jami-backup.gz
 
 # Always create new
 ./jami-sdk --account new --account-alias my-bot
+
+# Create-or-reuse: first run creates + exports, subsequent runs import
+./jami-sdk --account /tmp/jami-bot.gz
 
 # Import with password
 ./jami-sdk --account /path/to/export.gz --account-password secret123

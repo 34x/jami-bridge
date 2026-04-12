@@ -71,7 +71,7 @@ struct Config {
     ///   - Empty string: use first existing account, or create new one
     ///   - Account ID (hex string): use specific existing account
     ///   - "archive:///path/to/account.gz": import account from archive
-    ///   - "/path/to/account.gz": import account from archive
+    ///   - "/path/to/account.gz": if file exists, import; if not, create new and export
     ///   - "new": always create a new account
     std::string account;
 
