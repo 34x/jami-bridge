@@ -2,9 +2,7 @@
 build/
 dist/
 dev-dist/
-jami-sdk-dist-output/
 jami-bridge-dist-output/
-jami-sdk-dist/
 jami-bridge-dist/
 
 # Compiled objects
