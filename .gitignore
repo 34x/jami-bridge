@@ -1,0 +1,23 @@
+# Build artifacts
+build/
+dist/
+jami-sdk-dist-output/
+jami-sdk-dist/
+
+# Compiled objects
+*.o
+*.so
+*.so.*
+
+# Editor / OS
+*.swp
+*~
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+cmake-build-*/
+
+# Daemon submodule (managed by git)
+# daemon/ is tracked via submodule, not ignored

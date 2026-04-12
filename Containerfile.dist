@@ -1,0 +1,110 @@
+# Creates a self-contained distribution tarball.
+# The binary has RPATH $ORIGIN/lib embedded, so it finds libraries
+# in a lib/ directory next to itself. No LD_LIBRARY_PATH needed.
+#
+# Build: podman build -t jami-sdk-dist -f Containerfile.dist <project-root>
+#
+# Then extract the dist:
+#   podman create --name dist-extract jami-sdk-dist
+#   podman cp dist-extract:/dist/jami-sdk-dist.tar.gz .
+#   podman rm dist-extract
+#   tar xzf jami-sdk-dist.tar.gz
+#   ./jami-sdk-dist/jami-sdk --help
+
+FROM jami-sdk-base AS builder
+
+# Install build deps
+RUN dnf install -y nlohmann-json-devel && dnf clean all
+
+# Copy jami-sdk source
+COPY jami-sdk/src/ /build/jami-sdk/src/
+COPY jami-sdk/vendor/ /build/jami-sdk/vendor/
+COPY jami-sdk/CMakeLists.txt /build/jami-sdk/
+
+# Build jami-sdk with RPATH $ORIGIN/lib
+RUN cd /build/jami-sdk && \
+    mkdir -p build && cd build && \
+    cmake .. \
+        -DJAMI_INCLUDE_DIR=/usr/local/include/jami \
+        -DJAMI_LIBRARY=/usr/local/lib64/libjami.so && \
+    make -j$(nproc)
+
+# Verify RPATH is set
+RUN readelf -d /build/jami-sdk/build/jami-sdk | grep -i rpath || echo "WARNING: No RPATH found!"
+
+# ── Stage 2: Create distribution ──────────────────────────────────────
+FROM fedora:43 AS dist
+
+# Install runtime deps + patchelf for setting RPATH on bundled libs
+RUN dnf install -y patchelf \
+    gnutls nettle opus speexdsp \
+    yaml-cpp jsoncpp fmt \
+    libuuid libargon2 libarchive \
+    openssl-libs \
+    alsa-lib \
+    libgit2 libsecp256k1 \
+    libva libvdpau mesa-libGL \
+    libX11 libXext libXfixes \
+    pipewire-libs pulseaudio-libs \
+    dbus-libs msgpack sqlite-libs \
+    pcre2 expat \
+    && dnf clean all
+
+# Create distribution directory structure
+# jami-sdk-dist/
+# ├── jami-sdk          (binary with RPATH $ORIGIN/lib)
+# └── lib/
+#     ├── libjami.so.16.0.0   (jami daemon, 236MB)
+#     ├── libgit2.so.1.9.2    (git support, may not be on host)
+#     └── libsecp256k1.so.5.0.0 (crypto, may not be on host)
+
+RUN mkdir -p /dist/jami-sdk-dist/lib
+
+# Copy binary
+COPY --from=builder /build/jami-sdk/build/jami-sdk /dist/jami-sdk-dist/jami-sdk
+
+# Copy libjami.so from builder
+COPY --from=builder /usr/local/lib64/libjami.so.16.0.0 /dist/jami-sdk-dist/lib/libjami.so.16.0.0
+
+# Copy system libraries that may not be on the host
+COPY --from=builder /usr/lib64/libgit2.so.1.9.2 /dist/jami-sdk-dist/lib/libgit2.so.1.9.2
+COPY --from=builder /usr/lib64/libsecp256k1.so.5.0.0 /dist/jami-sdk-dist/lib/libsecp256k1.so.5.0.0
+COPY --from=builder /usr/lib64/libllhttp.so.9.3.1 /dist/jami-sdk-dist/lib/libllhttp.so.9.3.1
+
+# Create symlinks
+RUN cd /dist/jami-sdk-dist/lib && \
+    ln -sf libjami.so.16.0.0 libjami.so.16 && \
+    ln -sf libjami.so.16 libjami.so && \
+    ln -sf libgit2.so.1.9.2 libgit2.so.1.9 && \
+    ln -sf libsecp256k1.so.5.0.0 libsecp256k1.so.5 && \
+    ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
+
+# Patch RPATH on bundled shared libs that have transitive dependencies.
+# Without this, libgit2 can't find libllhttp (its transitive dep)
+# because RUNPATH doesn't cascade to transitive deps in modern glibc.
+# $ORIGIN makes each lib look in its own directory.
+RUN patchelf --set-rpath '$ORIGIN' /dist/jami-sdk-dist/lib/libjami.so.16.0.0 && \
+    patchelf --set-rpath '$ORIGIN' /dist/jami-sdk-dist/lib/libgit2.so.1.9.2 && \
+    patchelf --set-rpath '$ORIGIN' /dist/jami-sdk-dist/lib/libsecp256k1.so.5.0.0 && \
+    patchelf --set-rpath '$ORIGIN' /dist/jami-sdk-dist/lib/libllhttp.so.9.3.1 && \
+    echo "=== RPATH patches applied ===" && \
+    ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
+
+# Verify the binary works in the dist directory
+RUN chmod +x /dist/jami-sdk-dist/jami-sdk && \
+    cd /dist/jami-sdk-dist && \
+    LD_LIBRARY_PATH=/dist/jami-sdk-dist/lib ./jami-sdk --help && \
+    echo "=== Binary works! ===" && \
+    echo "=== Distribution size ===" && \
+    du -sh /dist/jami-sdk-dist/ && \
+    du -sh /dist/jami-sdk-dist/lib/
+
+# Verify ldd finds all libs via RPATH
+RUN cd /dist/jami-sdk-dist && \
+    LD_LIBRARY_PATH=/dist/jami-sdk-dist/lib ldd ./jami-sdk | grep "not found" && \
+    echo "ERROR: Missing libraries!" && exit 1 || \
+    echo "=== All libraries resolved! ==="
+
+# Create tarball
+RUN cd /dist && tar czf jami-sdk-dist.tar.gz jami-sdk-dist/ && \
+    ls -lh jami-sdk-dist.tar.gz

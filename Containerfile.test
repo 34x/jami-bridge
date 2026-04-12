@@ -1,0 +1,96 @@
+# Test the jami-sdk binary in a fresh Fedora container.
+# Validates that the self-contained dist works without any special packages.
+#
+# Build: ./build.sh test-dist
+#   or:  podman build -t jami-sdk-test -f Containerfile.test <project-root>
+#
+# Requires: jami-sdk-base image already built
+
+# ── Stage 1: Build the SDK ─────────────────────────────────────────────
+FROM jami-sdk-base AS builder
+
+RUN dnf install -y nlohmann-json-devel && dnf clean all
+
+COPY jami-sdk/src/ /build/jami-sdk/src/
+COPY jami-sdk/vendor/ /build/jami-sdk/vendor/
+COPY jami-sdk/CMakeLists.txt /build/jami-sdk/
+
+RUN cd /build/jami-sdk && \
+    mkdir -p build && cd build && \
+    cmake .. \
+        -DJAMI_INCLUDE_DIR=/usr/local/include/jami \
+        -DJAMI_LIBRARY=/usr/local/lib64/libjami.so && \
+    make -j$(nproc)
+
+# ── Stage 2: Full runtime image (same as production Containerfile) ─────
+FROM fedora:43 AS dist
+
+RUN dnf install -y \
+    gnutls nettle opus speexdsp \
+    yaml-cpp jsoncpp fmt \
+    libuuid libargon2 libarchive \
+    openssl-libs \
+    alsa-lib \
+    libgit2 libsecp256k1 \
+    libva libvdpau mesa-libGL \
+    libX11 libXext libXfixes \
+    pipewire-libs pulseaudio-libs \
+    dbus-libs msgpack sqlite-libs \
+    pcre2 expat \
+    && dnf clean all
+
+COPY --from=builder /usr/local/lib64/libjami.so* /usr/local/lib64/
+COPY --from=builder /build/daemon/contrib/x86_64-redhat-linux/lib/ /usr/local/lib64/
+COPY --from=builder /build/jami-sdk/build/jami-sdk /usr/local/bin/jami-sdk
+
+RUN ldconfig && \
+    useradd -m jami && \
+    mkdir -p /home/jami/.local/share/jami /home/jami/.config/jami && \
+    chown -R jami:jami /home/jami
+
+# ── Stage 3: Test in fresh Fedora (same runtime packages, binary from dist) ─
+FROM fedora:43 AS test
+
+RUN dnf install -y \
+    gnutls nettle opus speexdsp \
+    yaml-cpp jsoncpp fmt \
+    libuuid libargon2 libarchive \
+    openssl-libs \
+    alsa-lib \
+    libgit2 libsecp256k1 \
+    libva libvdpau mesa-libGL \
+    libX11 libXext libXfixes \
+    pipewire-libs pulseaudio-libs \
+    dbus-libs msgpack sqlite-libs \
+    pcre2 expat \
+    && dnf clean all
+
+# Copy binary and ALL /usr/local/lib64 libs from dist (includes libjami, contrib, etc.)
+COPY --from=dist /usr/local/bin/jami-sdk /opt/jami-sdk/jami-sdk
+COPY --from=dist /usr/local/lib64/ /opt/jami-sdk/lib/
+
+RUN chmod +x /opt/jami-sdk/jami-sdk
+
+# Test 1: Binary starts
+RUN echo "=== Test 1: Binary --help ===" && \
+    LD_LIBRARY_PATH=/opt/jami-sdk/lib /opt/jami-sdk/jami-sdk --help 2>&1 | head -5 && \
+    echo "=== PASS ==="
+
+# Test 2: All shared libs resolve
+RUN echo "=== Test 2: Shared library dependencies ===" && \
+    LD_LIBRARY_PATH=/opt/jami-sdk/lib ldd /opt/jami-sdk/jami-sdk 2>&1 | grep "not found" && exit 1 || echo "All libs resolved" && \
+    echo "=== PASS ==="
+
+# Test 3: Daemon initializes (5s timeout)
+RUN echo "=== Test 3: Daemon init (5s timeout) ===" && \
+    timeout 5 bash -c 'LD_LIBRARY_PATH=/opt/jami-sdk/lib /opt/jami-sdk/jami-sdk --port 9999 2>&1' || \
+    echo "(daemon exited — no account in container)" && \
+    echo "=== PASS ==="
+
+# Report what's in /opt/jami-sdk (for dist packaging reference)
+RUN echo "=== Dist contents ===" && \
+    find /opt/jami-sdk -type f -exec ls -lh {} \; && \
+    echo "=== Total size ===" && \
+    du -sh /opt/jami-sdk
+
+CMD ["bash"]

@@ -1,0 +1,82 @@
+# Cross-compile jami-daemon and jami-sdk for Windows (x86_64) using MinGW.
+#
+# This is experimental and may require manual fixes.
+# The daemon's contrib system supports MinGW cross-compilation via:
+#   contrib/bootstrap --host=x86_64-w64-mingw32
+#
+# Status: IN PROGRESS — produces a Windows .exe but runtime testing needed.
+#
+# Build: podman build -t jami-sdk-win64 -f Containerfile.mingw .
+#
+# The approach:
+#   1. Install MinGW cross-compiler toolchain on Fedora
+#   2. Build jami-daemon contrib deps for Windows
+#   3. Build jami-daemon with meson cross-file
+#   4. Cross-compile jami-sdk against the Windows daemon
+#   5. Package as .zip with all needed DLLs
+
+FROM fedora:43 AS builder
+
+# Install MinGW cross-compiler and build tools
+RUN dnf install -y \
+    meson ninja-build cmake gcc-c++ git pkgconfig \
+    make autoconf automake libtool yasm nasm \
+    which patch wget file \
+    perl-FindBin perl-IPC-Cmd gettext \
+    chrpath doxygen \
+    mingw64-gcc mingw64-gcc-c++ mingw64-binutils \
+    mingw64-headers mingw64-crt mingw64-winpthreads \
+    mingw64-pkg-config \
+    nlohmann-json-devel \
+    && dnf clean all
+
+# Set up MinGW environment
+ENV PREFIX_WIN=/usr/x86_64-w64-mingw32/sys-root/mingw
+ENV PKG_CONFIG_PATH=${PREFIX_WIN}/lib/pkgconfig:${PREFIX_WIN}/lib/pkgconfig/pkgconfig
+ENV PATH=/usr/x86_64-w64-mingw32/bin:$PATH
+
+# Clone jami-daemon source
+ARG JAMI_VERSION=master
+RUN mkdir -p /build && cd /build && \
+    git clone --depth=1 --branch=${JAMI_VERSION} \
+    https://git.jami.net/savoirfairelinux/jami-daemon.git daemon
+
+WORKDIR /build/daemon
+
+# Build contrib dependencies for Windows (MinGW target)
+# This is the hardest part — building opendht, pjproject, etc. for Windows
+RUN mkdir -p contrib/win64 && cd contrib/win64 && \
+    ../bootstrap --host=x86_64-w64-mingw32 --disable-downloads=false && \
+    make -j$(nproc) || true
+
+# Build daemon with meson cross-compilation
+COPY jami-sdk/cross-files/mingw64.txt /build/daemon/cross-files/mingw64.txt
+
+RUN mkdir -p build-win64 && cd build-win64 && \
+    meson setup .. \
+        -Dinterfaces=library \
+        -Dplugins=false \
+        --cross-file ../cross-files/mingw64.txt \
+        --prefix=${PREFIX_WIN} && \
+    ninja && \
+    ninja install || true
+
+# ── Stage 2: Cross-compile jami-sdk ───────────────────────────────────
+# (This stage depends on stage 1 succeeding)
+#
+# TODO: Once daemon builds for Windows, compile jami-sdk against it.
+# The SDK has minimal platform-specific code (just POSIX fork/exec in hook.cpp)
+# which needs a Windows alternative (CreateProcess).
+
+# ── Testing Notes ──────────────────────────────────────────────────────
+# The daemon's contrib build for MinGW is not guaranteed to succeed.
+# Known issues:
+#   - pjproject may need patches for MinGW
+#   - ffmpeg may need MinGW patches
+#   - libupnp (pupnp) may not cross-compile cleanly
+#   - Some system libraries need MinGW equivalents
+#
+# Alternative approaches:
+#   1. Build on MSYS2/Windows directly (official approach)
+#   2. Use vcpkg for Windows dependency management
+#   3. Use CMake-based build (daemon/compat/msvc/) on Windows

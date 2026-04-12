@@ -1,0 +1,80 @@
+# Step 1: Build jami-daemon from source in library mode.
+#
+# This Containerfile expects the jami-daemon source to be available as a
+# git submodule at ./daemon/ in the build context. The daemon is built with
+# -Dinterfaces=library which produces libjami.so with exported symbols.
+#
+# Build from repo root (where daemon/ submodule lives):
+#   podman build -t jami-sdk-base -f Containerfile.base .
+#
+# If daemon submodule is not available, you can clone it first:
+#   git submodule update --init
+#
+# Once built locally, this 4GB image is used as a cache layer for fast
+# SDK builds (Containerfile.dev, Containerfile).
+
+FROM fedora:43
+
+# Install build tools and system dependencies
+# Based on: https://docs.jami.net/en_US/build/dependencies.html
+RUN dnf install -y \
+    meson ninja-build cmake gcc-c++ git pkgconfig \
+    make autoconf automake libtool yasm nasm \
+    which patch wget file \
+    perl-FindBin perl-IPC-Cmd gettext \
+    boost-devel chrpath doxygen graphviz swig \
+    gnutls-devel nettle-devel opus-devel speexdsp-devel \
+    yaml-cpp-devel jsoncpp-devel fmt-devel \
+    libuuid-devel libargon2-devel libarchive-devel \
+    openssl-devel dbus-devel dbus-c++-devel \
+    pulseaudio-libs-devel alsa-lib-devel \
+    libva-devel libvdpau-devel mesa-libGL-devel \
+    libX11-devel libXext-devel libXfixes-devel \
+    pipewire-devel libgit2-devel libsecp256k1-devel \
+    expat-devel pcre2-devel \
+    systemd-devel msgpack-devel sqlite-devel \
+    ffmpeg-free-devel \
+    nlohmann-json-devel \
+    && dnf clean all
+
+# Copy daemon source from git submodule
+COPY daemon/ /build/daemon/
+
+WORKDIR /build/daemon
+
+# Build contrib dependencies from source (opendht, pjproject, etc.)
+RUN mkdir -p contrib/native && cd contrib/native && \
+    ../bootstrap --disable-downloads=false && \
+    make -j$(nproc)
+
+# Set up environment so meson finds contrib-built + system packages
+ENV CONTRIB_PREFIX=/build/daemon/contrib/x86_64-redhat-linux
+ENV PKG_CONFIG_PATH=${CONTRIB_PREFIX}/lib/pkgconfig:${CONTRIB_PREFIX}/lib/x86_64-redhat-linux/pkgconfig:/usr/lib64/pkgconfig
+ENV CMAKE_PREFIX_PATH=${CONTRIB_PREFIX}
+ENV LD_LIBRARY_PATH=${CONTRIB_PREFIX}/lib
+ENV C_INCLUDE_PATH=${CONTRIB_PREFIX}/include
+ENV CPLUS_INCLUDE_PATH=${CONTRIB_PREFIX}/include
+
+# Build the daemon in library mode
+RUN meson setup build-lib \
+        -Dinterfaces=library \
+        -Dplugins=false \
+        --prefix=/usr/local && \
+    ninja -C build-lib && \
+    ninja -C build-lib install && \
+    ldconfig
+
+# Verify build: check that libjami.so has libjami symbols
+RUN echo "=== Build verification ===" && \
+    echo "libjami files:" && \
+    find /usr/local -name "libjami*.so*" -exec ls -lh {} \; && \
+    echo "---" && \
+    echo "libjami:: symbols in libjami.so:" && \
+    nm -D /usr/local/lib64/libjami.so 2>/dev/null | c++filt | grep -c 'libjami::' && \
+    echo "---" && \
+    echo "Key API symbols:" && \
+    nm -D /usr/local/lib64/libjami.so 2>/dev/null | c++filt | grep 'libjami::\(init\|start\|fini\|sendMessage\|startConversation\|getAccountList\)' | head -10 && \
+    echo "---" && \
+    echo "Headers:" && \
+    ls /usr/local/include/jami/ && \
+    echo "=== Build complete ==="
