@@ -1,9 +1,9 @@
-# Repo Split Plan — jami-sdk + jami-bot
+# Repo Split Plan — jami-bridge + jami-bot
 
 ## Target Structure
 
 ```
-/path/to/jami-sdk/        ← NEW standalone repo
+/path/to/jami-bridge/        ← NEW standalone repo
 ├── .git/                             ← fresh git repo
 ├── daemon/                           ← git submodule (jami-daemon)
 ├── src/                              ← C++ source (client, server, etc.)
@@ -26,9 +26,9 @@
 
 ## What Moves Where
 
-### jami-sdk repo (from current jami-project/jami-sdk/)
+### jami-bridge repo (from current jami-project/jami-bridge/)
 
-Everything in `jami-sdk/` EXCEPT `examples/pi-bot/` moves to the new repo:
+Everything in `jami-bridge/` EXCEPT `examples/pi-bot/` moves to the new repo:
 - All `src/` files
 - `vendor/` (httplib.h, json.hpp)
 - `Containerfile.*`
@@ -40,7 +40,7 @@ Everything in `jami-sdk/` EXCEPT `examples/pi-bot/` moves to the new repo:
 
 **New addition**: `daemon/` git submodule pointing to `https://review.jami.net/jami-daemon`
 
-### jami-bot repo (from current jami-sdk/examples/pi-bot/)
+### jami-bot repo (from current jami-bridge/examples/pi-bot/)
 
 - `bot.py` — the main bot script
 - `README.md` — bot-specific docs
@@ -57,22 +57,22 @@ Everything in `jami-sdk/` EXCEPT `examples/pi-bot/` moves to the new repo:
 ```
 jami-daemon (upstream, git submodule)
      ↑
-jami-sdk (links to libjami.so, built from daemon submodule)
+jami-bridge (links to libjami.so, built from daemon submodule)
      ↑ (runtime-only, via STDIO JSON-RPC)
-jami-bot (subprocess of jami-sdk, no code imports)
+jami-bot (subprocess of jami-bridge, no code imports)
 ```
 
 - Daemon → SDK: compiled dependency (libjami.so)
-- SDK → Bot: runtime binary dependency (jami-sdk process)
+- SDK → Bot: runtime binary dependency (jami-bridge process)
 - Bot has **no code imports** from SDK — pure STDIO JSON-RPC contract
 
 ## Setup Steps (for new session)
 
-1. Create jami-sdk directory — copy files, init git, add daemon submodule
+1. Create jami-bridge directory — copy files, init git, add daemon submodule
 2. Create jami-bot directory — copy bot.py, init git
 3. Verify builds still work (`./build.sh base`, `./build.sh dev`)
-4. Verify bot works with `JAMI_SDK_PATH` pointing to SDK dist
-5. Update .gitignore in jami-project to remove jami-sdk/ tracking
+4. Verify bot works with `JAMI_BRIDGE_PATH` pointing to SDK dist
+5. Update .gitignore in jami-project to remove jami-bridge/ tracking
 
 ## Key Build Changes
 
@@ -83,6 +83,6 @@ jami-bot (subprocess of jami-sdk, no code imports)
 
 ## Bot Runtime Changes
 
-- `JAMI_SDK_PATH` env var or `--jami PATH` flag for binary location
+- `JAMI_BRIDGE_PATH` env var or `--jami PATH` flag for binary location
 - Bot is Python stdlib-only — no pip packages from SDK
-- Can run standalone once jami-sdk binary is available
+- Can run standalone once jami-bridge binary is available

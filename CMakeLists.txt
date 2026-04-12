@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(jami-sdk VERSION 0.1.0 LANGUAGES CXX)
+project(jami-bridge VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,15 +65,15 @@ set(SOURCES
 
 # ── Executable ──────────────────────────────────────────────────────────
 
-add_executable(jami-sdk ${SOURCES})
+add_executable(jami-bridge ${SOURCES})
 
-target_include_directories(jami-sdk PRIVATE
+target_include_directories(jami-bridge PRIVATE
     ${JAMI_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/vendor
 )
 
-target_link_libraries(jami-sdk PRIVATE
+target_link_libraries(jami-bridge PRIVATE
     ${JAMI_LIBRARY}
     pthread
 )
@@ -82,18 +82,18 @@ target_link_libraries(jami-sdk PRIVATE
 if(WIN32)
     # On Windows, hook.cpp is not compiled (uses POSIX fork/exec)
     list(REMOVE_ITEM SOURCES src/hook.cpp)
-    target_link_libraries(jami-sdk PRIVATE ws2_32 crypt32)
+    target_link_libraries(jami-bridge PRIVATE ws2_32 crypt32)
     # Windows doesn't use RPATH
-    set_target_properties(jami-sdk PROPERTIES
+    set_target_properties(jami-bridge PROPERTIES
         BUILD_RPATH ""
         INSTALL_RPATH ""
         BUILD_WITH_INSTALL_RPATH FALSE
     )
 else()
-    target_link_libraries(jami-sdk PRIVATE pthread)
+    target_link_libraries(jami-bridge PRIVATE pthread)
     # Embed RPATH so the binary finds libs in $ORIGIN/lib/ next to itself.
     # This eliminates the need for LD_LIBRARY_PATH or wrapper scripts.
-    set_target_properties(jami-sdk PROPERTIES
+    set_target_properties(jami-bridge PROPERTIES
         BUILD_RPATH "$ORIGIN/lib"
         INSTALL_RPATH "$ORIGIN/lib"
         BUILD_WITH_INSTALL_RPATH TRUE
@@ -102,4 +102,4 @@ endif()
 
 # ── Install ────────────────────────────────────────────────────────────
 
-install(TARGETS jami-sdk DESTINATION bin)
+install(TARGETS jami-bridge DESTINATION bin)

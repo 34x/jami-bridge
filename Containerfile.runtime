@@ -1,4 +1,4 @@
-# Minimal runtime image for jami-sdk development.
+# Minimal runtime image for jami-bridge development.
 # Contains only the system libraries needed by libjami.so and the SDK.
 # The SDK binary and bundled libs are mounted at runtime from the host.
 #
@@ -30,6 +30,6 @@ USER jami
 ENV XDG_DATA_HOME=/home/jami/.local/share
 ENV XDG_CONFIG_HOME=/home/jami/.config
 
-WORKDIR /opt/jami-sdk
+WORKDIR /opt/jami-bridge
 
-CMD ["./jami-sdk"]
+CMD ["./jami-bridge"]

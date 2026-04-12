@@ -1,6 +1,6 @@
 # Build artifacts
 build/
-jami-sdk-dist-output/
+jami-bridge-dist-output/
 
 # Git internals (daemon/ submodule content is needed for builds)
 .git/

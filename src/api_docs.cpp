@@ -1,3 +1,21 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 #include "api_docs.h"
 
 namespace jami {
@@ -79,7 +97,7 @@ const std::string& index_html() {
 <div class="ep"><div class="ep-h" onclick="t(this)"><span class="m m-GET">GET</span><span class="p">/api/accounts/:id/lookup/:name</span><span class="d">Look up a registered name</span></div><div class="ep-b"></div></div>
 <div class="ep"><div class="ep-h" onclick="t(this)"><span class="m m-POST">POST</span><span class="p">/api/accounts/:id/active</span><span class="d">Enable/disable account</span></div><div class="ep-b"><table><tr><th>Param</th><th>Type</th><th>Description</th></tr><tr><td>active</td><td>boolean</td><td>true to activate, false to deactivate</td></tr></table></div></div>
 
-<footer><a href="/api/openapi.json" style="color:var(--link)">OpenAPI 3.0 JSON</a> · jami-sdk v0.1.0</footer>
+<footer><a href="/api/openapi.json" style="color:var(--link)">OpenAPI 3.0 JSON</a> · jami-bridge v0.2.0</footer>
 <script>function t(el){el.nextElementSibling.classList.toggle('open');}</script>
 </body>
 </html>)rawliteral";
@@ -89,7 +107,7 @@ const std::string& index_html() {
 const std::string& openapi_json() {
     static const std::string spec = R"rawliteral({
   "openapi": "3.0.3",
-  "info": { "title": "Jami SDK", "version": "0.1.0", "description": "Programmable Jami messaging via HTTP REST API" },
+  "info": { "title": "Jami SDK", "version": "0.2.0", "description": "Programmable Jami messaging via HTTP REST API" },
   "servers": [ { "url": "http://localhost:8090" } ],
   "paths": {
     "/api/ping": { "get": { "summary": "Health check", "responses": { "200": { "description": "OK" } } } },

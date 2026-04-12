@@ -1,10 +1,10 @@
-# AGENTS.md — jami-sdk Project Context
+# AGENTS.md — jami-bridge Project Context
 
-> This file provides project context for AI coding agents working on jami-sdk.
+> This file provides project context for AI coding agents working on jami-bridge.
 
 ## Project Overview
 
-**jami-sdk** is a self-contained C++ service that links directly to `libjami.so`
+**jami-bridge** is a self-contained C++ service that links directly to `libjami.so`
 (library mode, no DBus), exposing an HTTP REST API, STDIO JSON-RPC interface,
 and CLI commands for programmatic access to the Jami messaging platform.
 
@@ -13,7 +13,7 @@ DBus daemon, and focuses on messaging (no calls/file transfers initially).
 
 ## Architecture
 
-Three modes in one binary (`jami-sdk`), all sharing the same `Client` class:
+Three modes in one binary (`jami-bridge`), all sharing the same `Client` class:
 
 | Mode | Flag | Interface | Use Case |
 |------|------|-----------|----------|
@@ -27,9 +27,19 @@ Three modes in one binary (`jami-sdk`), all sharing the same `Client` class:
 reads stdout for `{"reply": "text"}` auto-reply. Uses fork/exec/pipes with timeout.
 On Windows, `--hook` returns an error — use STDIO or HTTP mode instead.
 
+### File Transfers (STDIO-only)
+
+File transfer APIs (`sendFile`, `downloadFile`, `cancelTransfer`, `transferInfo`)
+and the `onDataTransferEvent` signal are **only available via STDIO JSON-RPC**.
+They are intentionally **not exposed as HTTP REST endpoints** because they accept
+arbitrary filesystem paths, which would be a security risk on a network-facing API.
+
+When HTTP file transfer support is added, it will include path restrictions and
+authentication.
+
 ### Invite Policy
 
-By default, the SDK is a **passive bridge** — it emits events but takes no action.
+By default, the bridge is a **passive bridge** — it emits events but takes no action.
 
 | Flag | Behavior | Use Case |
 |------|----------|----------|
@@ -67,10 +77,10 @@ All builds happen **inside podman containers** — never on the host.
 
 | Command | Description | Time |
 |---------|-------------|------|
-| `./build.sh base` | Build jami-sdk-base image (daemon from source) | ~20min, once |
+| `./build.sh base` | Build jami-bridge-base image (daemon from source) | ~20min, once |
 | `./build.sh dev` | Incremental build in dev container | <8s |
 | `./build.sh dev-run [args]` | Run dev binary in runtime container | — |
-| `./build.sh dev-dist` | Bundle binary + libs into `jami-sdk-dist-output/` | ~30s |
+| `./build.sh dev-dist` | Bundle binary + libs into `jami-bridge-dist-output/` | ~30s |
 | `./build.sh dev-shell` | Shell into running dev container | — |
 | `./build.sh dev-kill` | Stop dev container | — |
 | `./build.sh dev-clean` | Remove dev container and build dir | — |
@@ -89,13 +99,13 @@ All builds happen **inside podman containers** — never on the host.
 ### Dev Workflow
 
 1. `./build.sh base` — once, builds the 4GB base image
-2. `./build.sh dev` — starts persistent container `jami-sdk-dev` with source bind-mounted
+2. `./build.sh dev` — starts persistent container `jami-bridge-dev` with source bind-mounted
 3. Edit code on host → `./build.sh dev` rebuilds incrementally (<8s)
-4. `./build.sh dev-dist` — bundles binary + libs into `jami-sdk-dist-output/` (no image rebuild)
+4. `./build.sh dev-dist` — bundles binary + libs into `jami-bridge-dist-output/` (no image rebuild)
 
 **Typical cycle:** `./build.sh dev && ./build.sh dev-dist`
 
-Output: `jami-sdk-dist-output/jami-sdk-dist/jami-sdk` — self-contained binary
+Output: `jami-bridge-dist-output/jami-bridge-dist/jami-bridge` — self-contained binary
 with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
 
 **For running in a container:** `./build.sh dev-run [--port 8091]`
@@ -104,9 +114,9 @@ with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
 
 | Image | Purpose |
 |-------|---------|
-| `localhost/jami-sdk-base:latest` | Daemon compiled from source (library mode) |
-| `localhost/jami-sdk-dev:latest` | Thin dev layer on base |
-| `localhost/jami-sdk:latest` | Production image |
+| `localhost/jami-bridge-base:latest` | Daemon compiled from source (library mode) |
+| `localhost/jami-bridge-dev:latest` | Thin dev layer on base |
+| `localhost/jami-bridge:latest` | Production image |
 
 ## Dependencies
 
@@ -151,8 +161,8 @@ with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
 The `dev-dist` command bundles the dev binary + required shared libs:
 
 ```
-jami-sdk-dist/
-├── jami-sdk          # Binary (3.6 MB), RPATH: $ORIGIN/lib
+jami-bridge-dist/
+├── jami-bridge          # Binary (3.6 MB), RPATH: $ORIGIN/lib
 └── lib/
     ├── libjami.so.16.0.0         237 MB  Jami daemon
     ├── libgit2.so.1.9.2           1.3 MB  Git support
@@ -163,7 +173,7 @@ jami-sdk-dist/
 - Binary has `$ORIGIN/lib` RPATH — works without `LD_LIBRARY_PATH`
 - All bundled `.so` files also get `$ORIGIN` RPATH via `patchelf` (transitive deps)
 - Total: 243 MB extracted, ~92 MB compressed tarball
-- Output at: `jami-sdk-dist-output/jami-sdk-dist/`
+- Output at: `jami-bridge-dist-output/jami-bridge-dist/`
 
 **To rebuild the dist:** `./build.sh dev && ./build.sh dev-dist`
 
@@ -211,7 +221,7 @@ The create-or-reuse pattern enables persistent bot accounts:
 ```bash
 # First run: creates account + exports to /tmp/jami-bot.gz
 # Subsequent runs: imports the saved archive
-jami-sdk --account /tmp/jami-bot.gz
+jami-bridge --account /tmp/jami-bot.gz
 ```
 
 ## Key API Details
@@ -236,10 +246,6 @@ jami-sdk --account /tmp/jami-bot.gz
 | `/api/requests` | GET | Pending conversation requests |
 | `/api/requests/:id/accept` | POST | Accept request |
 | `/api/requests/:id/decline` | POST | Decline request |
-| `/api/accounts/:id/conversations/:conv/files` | POST | Send file {path, displayName?, replyTo?} |
-| `/api/accounts/:id/conversations/:conv/files/download` | POST | Download file {interactionId, fileId, path} |
-| `/api/accounts/:id/conversations/:conv/files/cancel` | POST | Cancel transfer {fileId} |
-| `/api/accounts/:id/conversations/:conv/files/:fileId` | GET | Get transfer info |
 | `/api/openapi.json` | GET | OpenAPI 3.0.3 spec |
 | `/` | GET | Interactive HTML docs |
 
@@ -284,6 +290,7 @@ SIGTERM works. SIGINT is unreliable (cpp-httplib doesn't handle it well).
 
 1. SSE/WebSocket for real-time event push (HTTP mode)
 2. Authentication for HTTP server
-3. Windows cross-compilation testing
-4. Reducing `libjami.so` size (236 MB)
-5. More hook event types
+3. HTTP file transfer endpoints (with path restrictions and authentication)
+4. Windows cross-compilation testing
+5. Reducing `libjami.so` size (236 MB)
+6. More hook event types

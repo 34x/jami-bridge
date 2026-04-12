@@ -1,3 +1,21 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /// @file stdio_server.cpp
 /// @brief JSON-RPC 2.0 server over stdin/stdout.
 ///
@@ -101,7 +119,7 @@ void StdioServer::run() {
     }
 
     running_ = false;
-    std::cerr << "[jami-sdk:stdio] Stdin closed, exiting." << std::endl;
+    std::cerr << "[jami-bridge:stdio] Stdin closed, exiting." << std::endl;
 }
 
 std::string StdioServer::handle_request(const std::string& json_line) {
@@ -160,12 +178,12 @@ std::string StdioServer::handle_request(const std::string& json_line) {
     try {
 
     if (method == "ping") {
-        return make_result({{"status", "ok"}, {"version", "0.1.0"}});
+        return make_result({{"status", "ok"}, {"version", "0.2.0"}});
     }
 
     if (method == "version") {
         return make_result({
-            {"version", "0.1.0"},
+            {"version", "0.2.0"},
             {"daemon", "jami"},
             {"mode", "library"},
             {"api", "REST+STDIO+CLI+hook"},

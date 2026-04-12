@@ -1,9 +1,12 @@
-# jami-sdk
+# jami-bridge
 
-Self-contained C++ service for the [Jami](https://jami.net/) messaging platform.
+**Unofficial** self-contained C++ bridge for the [Jami](https://jami.net/) messaging platform.
 
-Links directly to `libjami.so` (library mode — same approach as Android/iOS/Windows
-clients, no DBus required) and exposes three interfaces:
+> **Not affiliated with** [Savoir-faire Linux](https://www.savoirfairelinux.com/) or the
+> Jami project. Jami is a trademark of Savoir-faire Linux Inc.
+
+Runs the Jami daemon in-process (`libjami.so`, library mode — same approach as
+Android/iOS/Windows clients, no DBus required) and exposes it through three interfaces:
 
 | Mode | Use case |
 |------|----------|
@@ -13,7 +16,7 @@ clients, no DBus required) and exposes three interfaces:
 | **Hook** | Event-driven scripting — run any command on events |
 
 ```
-jami-sdk/              ← the binary (3.2 MB)
+jami-bridge/              ← the binary (3.2 MB)
 lib/                   ← 4 bundled libraries (240 MB)
   ├── libjami.so.16.0.0      Jami daemon
   ├── libgit2.so.1.9.2       Git repository support
@@ -33,22 +36,22 @@ Works out of the box — just extract and run.
 Grab the latest distribution tarball from releases, or build from source (see [Building](#building)).
 
 ```bash
-tar xzf jami-sdk-dist.tar.gz
-cd jami-sdk-dist
+tar xzf jami-bridge-dist.tar.gz
+cd jami-bridge-dist
 ```
 
 ### Run
 
 ```bash
 # HTTP server (default, port 8090)
-./jami-sdk
+./jami-bridge
 
-# The SDK prints your bot's Jami identity on startup:
-#   [jami-sdk] Bot identity: <your-jami-uri> (account: <account-id>, alias: bot)
-#   [jami-sdk] Add this bot to a group: invite <your-jami-uri>
+# The bridge prints your bot's Jami identity on startup:
+#   [jami-bridge] Bot identity: <your-jami-uri> (account: <account-id>, alias: bot)
+#   [jami-bridge] Add this bot to a group: invite <your-jami-uri>
 
 # Custom host/port
-./jami-sdk --host 127.0.0.1 --port 3000
+./jami-bridge --host 127.0.0.1 --port 3000
 
 # Health check
 curl -4 http://127.0.0.1:8090/api/ping
@@ -76,7 +79,7 @@ library inside the daemon intercepts it.)
 ### HTTP REST API (default)
 
 ```bash
-./jami-sdk [--host HOST] [--port PORT] [--debug]
+./jami-bridge [--host HOST] [--port PORT] [--debug]
 ```
 
 Starts an HTTP server. All operations are REST endpoints.
@@ -101,7 +104,7 @@ Interactive HTML docs at `GET /`, OpenAPI 3.0 spec at `GET /api/openapi.json`.
 ### STDIO (JSON-RPC over stdin/stdout)
 
 ```bash
-./jami-sdk --stdio
+./jami-bridge --stdio
 ```
 
 Reads JSON-RPC 2.0 requests from stdin (one per line), writes responses to stdout.
@@ -109,13 +112,13 @@ Reads JSON-RPC 2.0 requests from stdin (one per line), writes responses to stdou
 
 ```bash
 # Example session
-echo '{"jsonrpc":"2.0","method":"listAccounts","id":1}' | ./jami-sdk --stdio
+echo '{"jsonrpc":"2.0","method":"listAccounts","id":1}' | ./jami-bridge --stdio
 # → {"jsonrpc":"2.0","id":1,"result":{"accounts":["<account-id>"]}}
 
 # Send a message
-echo '{"jsonrpc":"2.0","method":"sendMessage","params":{"accountId":"...","conversationId":"...","body":"hello"},"id":2}' | ./jami-sdk --stdio
+echo '{"jsonrpc":"2.0","method":"sendMessage","params":{"accountId":"...","conversationId":"...","body":"hello"},"id":2}' | ./jami-bridge --stdio
 
-# Real-time event notification (pushed by SDK without request):
+# Real-time event notification (pushed by bridge without request):
 # {"jsonrpc":"2.0","method":"onMessageReceived","params":{"accountId":"...","conversationId":"...","from":"...","body":"hi!"}}
 ```
 
@@ -147,7 +150,7 @@ echo '{"jsonrpc":"2.0","method":"sendMessage","params":{"accountId":"...","conve
 | `sendTrustRequest` | `accountId, uri` | `{sent}` |
 | `listTrustRequests` | `accountId` | `{requests}` |
 
-**Event notifications** (pushed by SDK):
+**Event notifications** (pushed by bridge):
 
 | Method | When |
 |--------|------|
@@ -161,16 +164,16 @@ Shutdown: send `EOF` on stdin, or call the `shutdown` method.
 
 ```bash
 # List accounts
-./jami-sdk --list-accounts
+./jami-bridge --list-accounts
 
 # List conversations
-./jami-sdk --list-conversations --account ACCOUNT_ID
+./jami-bridge --list-conversations --account ACCOUNT_ID
 
 # Send a message
-./jami-sdk --send-message --account ACCOUNT_ID --conversation CONV_ID --body "Hello!"
+./jami-bridge --send-message --account ACCOUNT_ID --conversation CONV_ID --body "Hello!"
 
 # Load recent messages
-./jami-sdk --load-messages --account ACCOUNT_ID --conversation CONV_ID --count 20
+./jami-bridge --load-messages --account ACCOUNT_ID --conversation CONV_ID --count 20
 ```
 
 All CLI commands print JSON to stdout and exit. The daemon starts, runs the
@@ -183,22 +186,22 @@ No HTTP server, no STDIO protocol, no programming language required.
 
 ```bash
 # Run a shell script on every message
-./jami-sdk --hook ./on-message.sh
+./jami-bridge --hook ./on-message.sh
 
 # Run a Python bot
-./jami-sdk --hook "python3 bot.py"
+./jami-bridge --hook "python3 bot.py"
 
 # Combine with HTTP for bidirectional use
-./jami-sdk --port 8090 --hook "python3 bot.py"
+./jami-bridge --port 8090 --hook "python3 bot.py"
 
 # Handle all event types
-./jami-sdk --hook ./handler.sh --hook-events onMessageReceived,onConversationRequestReceived
+./jami-bridge --hook ./handler.sh --hook-events onMessageReceived,onConversationRequestReceived
 
 # Custom timeout
-./jami-sdk --hook "python3 slow_bot.py" --hook-timeout 60
+./jami-bridge --hook "python3 slow_bot.py" --hook-timeout 60
 ```
 
-**How it works:** When an event arrives, the SDK spawns the hook command. The event
+**How it works:** When an event arrives, the bridge spawns the hook command. The event
 data is available as:
 
 | Input | Description |
@@ -209,7 +212,7 @@ data is available as:
 | `$JAMI_ACCOUNT_ID` | Account ID |
 | `$JAMI_CONVERSATION_ID` | Conversation ID |
 
-**Replies:** If the hook prints JSON to stdout, the SDK can send messages back:
+**Replies:** If the hook prints JSON to stdout, the bridge can send messages back:
 
 ```json
 {"reply": "Got it!"}
@@ -220,7 +223,7 @@ data is available as:
 ```
 
 If stdout is empty or not JSON, no message is sent. Hook stderr goes to the
-SDK's stderr (visible in logs).
+bridge stderr (visible in logs).
 
 **Example — Shell script:**
 
@@ -279,12 +282,12 @@ The hook command runs via `/bin/sh -c`, so pipes and redirects work.
 
 ### Invite Policy
 
-By default, the SDK acts as a **passive bridge** — it emits conversation/trust
+By default, the bridge acts as a **passive bridge** — it emits conversation/trust
 request events but takes no action. This lets consumers (bots, scripts) decide
 what to do.
 
 For convenience (especially with `--hook` mode where the hook can't call back
-into the SDK), three invite policy flags are available:
+into the bridge), three invite policy flags are available:
 
 | Flag | Behavior |
 |------|----------|
@@ -297,10 +300,10 @@ into the SDK), three invite policy flags are available:
 
 ```bash
 # Setup phase: accept from you only, so you can add the bot to groups
-./jami-sdk --hook bot.py --auto-accept-from <your-jami-uri>
+./jami-bridge --hook bot.py --auto-accept-from <your-jami-uri>
 
 # Production: reject everyone, only respond to messages in existing rooms
-./jami-sdk --hook bot.py --reject-unknown
+./jami-bridge --hook bot.py --reject-unknown
 ```
 
 **Config file:**
@@ -335,10 +338,10 @@ The daemon stores account data, conversation history, and cache using the
 ### Using an existing Jami account
 
 If the Jami desktop app (Flatpak) is already configured with an account, the
-SDK will automatically find and use it — they share the same data directory.
+bridge will automatically find and use it — they share the same data directory.
 This means:
 
-- **Same account, same conversations** — messages sent via SDK appear in the
+- **Same account, same conversations** — messages sent via bridge appear in the
   desktop app and vice versa
 - **Don't run both simultaneously** — the daemon opens network ports and
   manages state; running two instances on the same account can cause conflicts
@@ -356,13 +359,13 @@ mkdir -p /tmp/jami-bot/{data,config,cache}
 XDG_DATA_HOME=/tmp/jami-bot/data \
 XDG_CONFIG_HOME=/tmp/jami-bot/config \
 XDG_CACHE_HOME=/tmp/jami-bot/cache \
-  ./jami-sdk --port 8091
+  ./jami-bridge --port 8091
 
 # Or via STDIO
 XDG_DATA_HOME=/tmp/jami-bot/data \
 XDG_CONFIG_HOME=/tmp/jami-bot/config \
 XDG_CACHE_HOME=/tmp/jami-bot/cache \
-  ./jami-sdk --stdio
+  ./jami-bridge --stdio
 ```
 
 Then create a new account via the API:
@@ -379,19 +382,19 @@ The same can be done with CLI flags (no env vars needed):
 
 ```bash
 # Use separate data dirs
-./jami-sdk --data-dir /tmp/jami-bot/data \
+./jami-bridge --data-dir /tmp/jami-bot/data \
             --config-dir /tmp/jami-bot/config \
             --cache-dir /tmp/jami-bot/cache \
             --port 8091
 
 # Create a new account
-./jami-sdk --data-dir /tmp/jami-bot/data \
+./jami-bridge --data-dir /tmp/jami-bot/data \
             --account new --account-alias my-bot
 ```
 
 ### Account Management
 
-The `--account` flag controls which Jami account the SDK uses:
+The `--account` flag controls which Jami account the bridge uses:
 
 | `--account` value | Behavior |
 |---|---|
@@ -403,22 +406,22 @@ The `--account` flag controls which Jami account the SDK uses:
 
 ```bash
 # Auto-detect (use existing or create new)
-./jami-sdk
+./jami-bridge
 
 # Use specific account
-./jami-sdk --account <account-id>
+./jami-bridge --account <account-id>
 
 # Import from archive (backup file from Jami desktop app)
-./jami-sdk --account archive:///path/to/jami-backup.gz
+./jami-bridge --account archive:///path/to/jami-backup.gz
 
 # Always create new
-./jami-sdk --account new --account-alias my-bot
+./jami-bridge --account new --account-alias my-bot
 
 # Create-or-reuse: first run creates + exports, subsequent runs import
-./jami-sdk --account /tmp/jami-bot.gz
+./jami-bridge --account /tmp/jami-bot.gz
 
 # Import with password
-./jami-sdk --account /path/to/export.gz --account-password secret123
+./jami-bridge --account /path/to/export.gz --account-password secret123
 ```
 
 ### Config File
@@ -443,7 +446,7 @@ All settings can be specified in a JSON config file:
 ```
 
 ```bash
-./jami-sdk --config /etc/jami/sdk.json
+./jami-bridge --config /etc/jami/bridge.json
 ```
 
 CLI arguments override config file values.
@@ -458,7 +461,7 @@ podman run -d \
   -e XDG_DATA_HOME=/data \
   -e XDG_CONFIG_HOME=/data/config \
   -e XDG_CACHE_HOME=/data/cache \
-  jami-sdk
+  jami-bridge
 ```
 
 ---
@@ -471,10 +474,10 @@ Jami conversations to the [pi](https://github.com/nicoschmdt/pi) AI coding agent
 ### How it works
 
 ```
-Jami user ↔ jami-sdk (STDIO) ↔ bot.py ↔ pi
+Jami user ↔ jami-bridge (STDIO) ↔ bot.py ↔ pi
 ```
 
-The bot launches `jami-sdk --stdio` as a subprocess and communicates via
+The bot launches `jami-bridge --stdio` as a subprocess and communicates via
 JSON-RPC. **No HTTP server, no polling** — events are pushed in real-time.
 
 ### Quick start
@@ -483,20 +486,20 @@ JSON-RPC. **No HTTP server, no polling** — events are pushed in real-time.
 cd examples/pi-bot
 
 # Auto-detect account and conversation
-python3 bot.py --jami /path/to/jami-sdk
+python3 bot.py --jami /path/to/jami-bridge
 
 # Specify conversation
-python3 bot.py --jami /path/to/jami-sdk --conversation CONV_ID
+python3 bot.py --jami /path/to/jami-bridge --conversation CONV_ID
 
 # Dry-run (don't call pi, just log)
-python3 bot.py --jami /path/to/jami-sdk --dry-run
+python3 bot.py --jami /path/to/jami-bridge --dry-run
 ```
 
 ### Bot options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--jami PATH` | `jami-sdk` | Path to jami-sdk binary |
+| `--jami PATH` | `jami-bridge` | Path to jami-bridge binary |
 | `--account ID` | auto-detect | Jami account ID |
 | `--conversation ID` | auto-detect | Conversation to monitor |
 | `--history N` | `20` | Recent messages to include as context |
@@ -531,7 +534,7 @@ All compilation happens inside Podman containers — **nothing is built on the h
 
 ### Development workflow (recommended)
 
-The fastest way to iterate on the SDK. Source is mounted from the host,
+The fastest way to iterate on the bridge. Source is mounted from the host,
 so only changed files are recompiled. Uses the existing dev container
 with a mounted output directory — no image rebuilds, no `podman create/cp/rm`
 extraction dance.
@@ -559,20 +562,20 @@ extraction dance.
 ./build.sh dev && ./build.sh dev-dist
 
 # Run the dist binary directly on the host
-./jami-sdk-dist-output/jami-sdk-dist/jami-sdk --help
+./jami-bridge-dist-output/jami-bridge-dist/jami-bridge --help
 ```
 
 This is the `dev` equivalent of `make clean && make build`:
 `dev` recompiles, `dev-dist` bundles the fresh binary + libs into
-`jami-sdk-dist-output/`.
+`jami-bridge-dist-output/`.
 
 **All dev commands:**
 
 | Command | Description |
 |---------|-------------|
-| `./build.sh dev` | Compile SDK in dev container (incremental, <8s on rebuild) |
+| `./build.sh dev` | Compile bridge in dev container (incremental, <8s on rebuild) |
 | `./build.sh dev-run [args]` | Run dev binary in runtime container (port forwarding, signals) |
-| `./build.sh dev-dist` | Bundle binary + libs into `jami-sdk-dist-output/` |
+| `./build.sh dev-dist` | Bundle binary + libs into `jami-bridge-dist-output/` |
 | `./build.sh dev-shell` | Shell into dev container |
 | `./build.sh dev-kill` | Stop dev container |
 | `./build.sh dev-clean` | Remove dev container and build dir |
@@ -583,29 +586,29 @@ Full image builds — for tagged releases or when you need the production
 distribution tarball via multi-stage build.
 
 ```bash
-# Production SDK + dist image (multi-stage, ~5 min)
+# Production bridge + dist image (multi-stage, ~5 min)
 ./build.sh dist
 
 # Test the dist in a fresh Fedora container
 ./build.sh test-dist
 ```
 
-The `dist` target builds a `jami-sdk-dist` container image with the
-tarball at `/dist/jami-sdk-dist.tar.gz`. Extract it:
+The `dist` target builds a `jami-bridge-dist` container image with the
+tarball at `/dist/jami-bridge-dist.tar.gz`. Extract it:
 
 ```bash
-podman create --name extract jami-sdk-dist
-podman cp extract:/dist/jami-sdk-dist.tar.gz .
+podman create --name extract jami-bridge-dist
+podman cp extract:/dist/jami-bridge-dist.tar.gz .
 podman rm extract
-tar xzf jami-sdk-dist.tar.gz
-./jami-sdk-dist/jami-sdk --help
+tar xzf jami-bridge-dist.tar.gz
+./jami-bridge-dist/jami-bridge --help
 ```
 
 Produces a self-contained directory:
 
 ```
-jami-sdk-dist/          (243 MB extracted, 92 MB compressed)
-├── jami-sdk            3.2 MB binary (RPATH: $ORIGIN/lib)
+jami-bridge-dist/          (243 MB extracted, 92 MB compressed)
+├── jami-bridge            3.2 MB binary (RPATH: $ORIGIN/lib)
 └── lib/
     ├── libjami.so.16.0.0       237 MB  Jami daemon
     ├── libgit2.so.1.9.2         1.3 MB  Git support
@@ -633,7 +636,7 @@ no wrapper scripts, no system package installs (on Fedora 43+).
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                    jami-sdk                          │
+│                    jami-bridge                          │
 │                                                      │
 │  ┌──────────┐  ┌──────────┐  ┌──────────────────┐  │
 │  │ HTTP     │  │ STDIO    │  │ CLI (one-shot)   │  │
@@ -675,7 +678,7 @@ Default: **8090** (avoids common port conflicts).
 
 Change with `--port`:
 ```bash
-./jami-sdk --port 3000
+./jami-bridge --port 3000
 ```
 
 ---
@@ -687,7 +690,7 @@ Change with `--port`:
 The `lib/` directory must be next to the binary:
 ```
 my-dir/
-├── jami-sdk
+├── jami-bridge
 └── lib/
     ├── libjami.so.16.0.0
     └── ...
@@ -695,7 +698,7 @@ my-dir/
 
 Verify RPATH:
 ```bash
-readelf -d jami-sdk | grep RPATH
+readelf -d jami-bridge | grep RPATH
 # Should show: $ORIGIN/lib
 ```
 
@@ -703,7 +706,7 @@ readelf -d jami-sdk | grep RPATH
 
 All four `.so` files must be in `lib/`, including symlinks. Verify:
 ```bash
-ldd jami-sdk | grep "not found"
+ldd jami-bridge | grep "not found"
 # Should show nothing
 ```
 
@@ -716,14 +719,18 @@ ldd jami-sdk | grep "not found"
 ### Port already in use
 
 ```bash
-./jami-sdk --port 3000    # Use a different port
+./jami-bridge --port 3000    # Use a different port
 ```
 
 ---
 
 ## License
 
-jami-sdk itself is MIT-licensed. The Jami daemon (libjami.so) is GPL-3.0.
-Using jami-sdk to interact with the Jami network does not impose additional
-licensing requirements, but distributing libjami.so as part of a combined
-work may require GPL-3.0 compliance for that component.
+**GPL-3.0** — See [LICENSE](LICENSE).
+
+jami-bridge links directly against `libjami.so` (GPL-3.0, Copyright © 2004-2026
+Savoir-faire Linux Inc.) and bundles it in the distribution package, forming a
+GPL combined work. The entire distribution (binary + libjami.so) is GPL-3.0.
+
+Third-party components: cpp-httplib (MIT), nlohmann/json (MIT), libgit2
+(GPL-2.0+exception), libsecp256k1 (MIT), libllhttp (MIT). All compatible with GPL-3.0.

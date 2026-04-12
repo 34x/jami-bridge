@@ -1,0 +1,49 @@
+GNU GENERAL PUBLIC LICENSE
+Version 3, 29 June 2007
+
+Copyright (C) 2025-2026 Contributors to the jami-bridge project
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+---
+
+THIRD-PARTY COMPONENTS
+
+This software distribution includes the following third-party components,
+each under their respective licenses:
+
+- libjami (Jami daemon) — GPL-3.0
+  Copyright (C) 2004-2026 Savoir-faire Linux Inc.
+  https://jami.net/
+
+- cpp-httplib v0.18.3 — MIT License
+  Copyright (c) 2023 Yuji Hirose
+  https://github.com/yhirose/cpp-httplib
+
+- nlohmann/json v3.11.3 — MIT License
+  Copyright (c) 2013-2022 Niels Lohmann
+  https://github.com/nlohmann/json
+
+- libgit2 v1.9.2 — GPL-2.0 with linking exception
+  https://libgit2.org/
+
+- libsecp256k1 — MIT License
+  https://github.com/bitcoin-core/secp256k1
+
+- libllhttp v9.3.1 — MIT License
+  https://github.com/nodejs/llhttp
+
+The bundled libjami.so is a GPL-3.0 combined work. When distributing
+the jami-bridge distribution package (binary + libjami.so), the GPL-3.0
+terms apply to the combined work as a whole.

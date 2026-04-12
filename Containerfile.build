@@ -1,9 +1,9 @@
-# Build container for jami-sdk
-# Builds jami-daemon in library mode, then compiles jami-sdk against it.
+# Build container for jami-bridge
+# Builds jami-daemon in library mode, then compiles jami-bridge against it.
 #
 # Usage:
-#   podman build -t jami-sdk-builder -f Containerfile.build .
-#   podman run --rm -v $(pwd):/output jami-sdk-builder
+#   podman build -t jami-bridge-builder -f Containerfile.build .
+#   podman run --rm -v $(pwd):/output jami-bridge-builder
 
 FROM fedora:43
 

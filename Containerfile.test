@@ -1,21 +1,21 @@
-# Test the jami-sdk binary in a fresh Fedora container.
+# Test the jami-bridge binary in a fresh Fedora container.
 # Validates that the self-contained dist works without any special packages.
 #
 # Build: ./build.sh test-dist
-#   or:  podman build -t jami-sdk-test -f Containerfile.test .
+#   or:  podman build -t jami-bridge-test -f Containerfile.test .
 #
-# Requires: jami-sdk-base image already built
+# Requires: jami-bridge-base image already built
 
 # ── Stage 1: Build the SDK ─────────────────────────────────────────────
-FROM jami-sdk-base AS builder
+FROM jami-bridge-base AS builder
 
 RUN dnf install -y nlohmann-json-devel && dnf clean all
 
-COPY src/ /build/jami-sdk/src/
-COPY vendor/ /build/jami-sdk/vendor/
-COPY CMakeLists.txt /build/jami-sdk/
+COPY src/ /build/jami-bridge/src/
+COPY vendor/ /build/jami-bridge/vendor/
+COPY CMakeLists.txt /build/jami-bridge/
 
-RUN cd /build/jami-sdk && \
+RUN cd /build/jami-bridge && \
     mkdir -p build && cd build && \
     cmake .. \
         -DJAMI_INCLUDE_DIR=/usr/local/include/jami \
@@ -40,7 +40,7 @@ RUN dnf install -y \
     && dnf clean all
 
 COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
-COPY --from=builder /build/jami-sdk/build/jami-sdk /usr/local/bin/jami-sdk
+COPY --from=builder /build/jami-bridge/build/jami-bridge /usr/local/bin/jami-bridge
 
 RUN ldconfig && \
     useradd -m jami && \
@@ -65,31 +65,31 @@ RUN dnf install -y \
     && dnf clean all
 
 # Copy binary and ALL /usr/local/lib64 libs from dist (includes libjami, contrib, etc.)
-COPY --from=dist /usr/local/bin/jami-sdk /opt/jami-sdk/jami-sdk
-COPY --from=dist /usr/local/lib64/ /opt/jami-sdk/lib/
+COPY --from=dist /usr/local/bin/jami-bridge /opt/jami-bridge/jami-bridge
+COPY --from=dist /usr/local/lib64/ /opt/jami-bridge/lib/
 
-RUN chmod +x /opt/jami-sdk/jami-sdk
+RUN chmod +x /opt/jami-bridge/jami-bridge
 
 # Test 1: Binary starts
 RUN echo "=== Test 1: Binary --help ===" && \
-    LD_LIBRARY_PATH=/opt/jami-sdk/lib /opt/jami-sdk/jami-sdk --help 2>&1 | head -5 && \
+    LD_LIBRARY_PATH=/opt/jami-bridge/lib /opt/jami-bridge/jami-bridge --help 2>&1 | head -5 && \
     echo "=== PASS ==="
 
 # Test 2: All shared libs resolve
 RUN echo "=== Test 2: Shared library dependencies ===" && \
-    LD_LIBRARY_PATH=/opt/jami-sdk/lib ldd /opt/jami-sdk/jami-sdk 2>&1 | grep "not found" && exit 1 || echo "All libs resolved" && \
+    LD_LIBRARY_PATH=/opt/jami-bridge/lib ldd /opt/jami-bridge/jami-bridge 2>&1 | grep "not found" && exit 1 || echo "All libs resolved" && \
     echo "=== PASS ==="
 
 # Test 3: Daemon initializes (5s timeout)
 RUN echo "=== Test 3: Daemon init (5s timeout) ===" && \
-    timeout 5 bash -c 'LD_LIBRARY_PATH=/opt/jami-sdk/lib /opt/jami-sdk/jami-sdk --port 9999 2>&1' || \
+    timeout 5 bash -c 'LD_LIBRARY_PATH=/opt/jami-bridge/lib /opt/jami-bridge/jami-bridge --port 9999 2>&1' || \
     echo "(daemon exited — no account in container)" && \
     echo "=== PASS ==="
 
-# Report what's in /opt/jami-sdk (for dist packaging reference)
+# Report what's in /opt/jami-bridge (for dist packaging reference)
 RUN echo "=== Dist contents ===" && \
-    find /opt/jami-sdk -type f -exec ls -lh {} \; && \
+    find /opt/jami-bridge -type f -exec ls -lh {} \; && \
     echo "=== Total size ===" && \
-    du -sh /opt/jami-sdk
+    du -sh /opt/jami-bridge
 
 CMD ["bash"]

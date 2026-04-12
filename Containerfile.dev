@@ -1,26 +1,26 @@
-# Development image for jami-sdk.
+# Development image for jami-bridge.
 #
-# This is a thin layer on top of jami-sdk-base that adds only the
+# This is a thin layer on top of jami-bridge-base that adds only the
 # SDK build dependencies (nlohmann-json). Source code is NOT copied
 # into the image — instead, it's mounted at runtime for fast
 # incremental builds.
 #
-# Build once:  podman build -t jami-sdk-dev -f Containerfile.dev .
+# Build once:  podman build -t jami-bridge-dev -f Containerfile.dev .
 # Develop:    ./build.sh dev
 # Shell:      ./build.sh dev-shell
 #
 # The dev workflow mounts the host source directory and builds
 # incrementally inside the container. The output binary appears
-# on the host filesystem (jami-sdk/build/jami-sdk).
+# on the host filesystem (jami-bridge/build/jami-bridge).
 
-FROM jami-sdk-base
+FROM jami-bridge-base
 
 RUN dnf install -y nlohmann-json-devel patchelf && dnf clean all
 
 # Create build directory so the mount target exists
-RUN mkdir -p /build/jami-sdk/build
+RUN mkdir -p /build/jami-bridge/build
 
-WORKDIR /build/jami-sdk
+WORKDIR /build/jami-bridge
 
 # Default: run cmake + make
 # Source is mounted at runtime, not baked in.

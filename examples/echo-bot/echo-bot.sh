@@ -2,8 +2,8 @@
 # echo-bot.sh — Simple Jami echo bot using --hook
 #
 # Usage:
-#   ./jami-sdk --hook ./echo-bot.sh
-#   ./jami-sdk --port 8090 --hook ./echo-bot.sh  # HTTP + hook
+#   ./jami-bridge --hook ./echo-bot.sh
+#   ./jami-bridge --port 8090 --hook ./echo-bot.sh  # HTTP + hook
 #
 # The hook receives event data via:
 #   $JAMI_EVENT       — Full event JSON (recommended)
@@ -37,7 +37,7 @@ event = json.load(sys.stdin)
 print(event.get('from', 'unknown')[:8])
 " 2>/dev/null || echo "unknown")
 
-# Log to stderr (visible in jami-sdk logs)
+# Log to stderr (visible in jami-bridge logs)
 echo "[echo-bot] Received from $FROM: $BODY" >&2
 
 # Reply with an echo

@@ -1,3 +1,21 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /// @file hook.cpp
 /// @brief Hook execution and management.
 ///
@@ -55,12 +73,12 @@ HookResult run_hook_command(const std::string& command,
     int stdout_pipe[2];
 
     if (pipe(stdin_pipe) < 0) {
-        std::cerr << "[jami-sdk:hook] Failed to create stdin pipe: "
+        std::cerr << "[jami-bridge:hook] Failed to create stdin pipe: "
                   << std::strerror(errno) << std::endl;
         return result;
     }
     if (pipe(stdout_pipe) < 0) {
-        std::cerr << "[jami-sdk:hook] Failed to create stdout pipe: "
+        std::cerr << "[jami-bridge:hook] Failed to create stdout pipe: "
                   << std::strerror(errno) << std::endl;
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
@@ -70,7 +88,7 @@ HookResult run_hook_command(const std::string& command,
     pid_t pid = fork();
 
     if (pid < 0) {
-        std::cerr << "[jami-sdk:hook] Failed to fork: "
+        std::cerr << "[jami-bridge:hook] Failed to fork: "
                   << std::strerror(errno) << std::endl;
         close(stdin_pipe[0]);
         close(stdin_pipe[1]);
@@ -122,7 +140,7 @@ HookResult run_hook_command(const std::string& command,
         ssize_t n = write(stdin_pipe[1], data + total_written, to_write - total_written);
         if (n < 0) {
             if (errno == EPIPE || errno == EINTR) break;
-            std::cerr << "[jami-sdk:hook] Write error: " << std::strerror(errno) << std::endl;
+            std::cerr << "[jami-bridge:hook] Write error: " << std::strerror(errno) << std::endl;
             break;
         }
         total_written += n;
@@ -143,7 +161,7 @@ HookResult run_hook_command(const std::string& command,
         ).count();
 
         if (remaining_ms <= 0 && timeout_seconds > 0) {
-            std::cerr << "[jami-sdk:hook] Timed out after " << timeout_seconds
+            std::cerr << "[jami-bridge:hook] Timed out after " << timeout_seconds
                       << "s, killing process " << pid << std::endl;
             kill(pid, SIGKILL);
             result.timed_out = true;
@@ -158,7 +176,7 @@ HookResult run_hook_command(const std::string& command,
 
         if (ret < 0) {
             if (errno == EINTR) continue;
-            std::cerr << "[jami-sdk:hook] Poll error: " << std::strerror(errno) << std::endl;
+            std::cerr << "[jami-bridge:hook] Poll error: " << std::strerror(errno) << std::endl;
             break;
         }
 
@@ -238,7 +256,7 @@ HookManager::HookManager(Client& client, const std::string& command,
         else if (token == "onConversationReady" || token == "all") handle_conversation_ready_ = true;
         else if (token == "onMessageStatusChanged" || token == "all") handle_message_status_changed_ = true;
         else if (!token.empty()) {
-            std::cerr << "[jami-sdk:hook] Unknown event type: " << token
+            std::cerr << "[jami-bridge:hook] Unknown event type: " << token
                       << " (supported: onMessageReceived, onConversationRequestReceived,"
                       << " onTrustRequestReceived, onRegistrationChanged, onConversationReady,"
                       << " onMessageStatusChanged, all)" << std::endl;
@@ -391,7 +409,7 @@ void HookManager::dispatch(const std::string& event_type,
 
     std::thread([this, cmd, event_json, event_type, acc_id, cid, timeout]() {
         try {
-            std::cerr << "[jami-sdk:hook] Dispatching " << event_type
+            std::cerr << "[jami-bridge:hook] Dispatching " << event_type
                       << " to: " << cmd << std::endl;
 
             client_.stats().hook_invocations++;
@@ -407,13 +425,13 @@ void HookManager::dispatch(const std::string& event_type,
             HookResult result = run_hook_command(cmd, event_json, timeout, env_vars);
 
             if (result.timed_out) {
-                std::cerr << "[jami-sdk:hook] Hook timed out" << std::endl;
+                std::cerr << "[jami-bridge:hook] Hook timed out" << std::endl;
                 client_.stats().hook_timeouts++;
                 return;
             }
 
             if (result.exit_code != 0 && result.exit_code != -1) {
-                std::cerr << "[jami-sdk:hook] Hook exited with code " << result.exit_code << std::endl;
+                std::cerr << "[jami-bridge:hook] Hook exited with code " << result.exit_code << std::endl;
                 client_.stats().hook_errors++;
             }
 
@@ -421,7 +439,7 @@ void HookManager::dispatch(const std::string& event_type,
                 handle_response(result.output, acc_id, cid);
             }
         } catch (const std::exception& e) {
-            std::cerr << "[jami-sdk:hook] Error: " << e.what() << std::endl;
+            std::cerr << "[jami-bridge:hook] Error: " << e.what() << std::endl;
         }
     }).detach();
 }
@@ -435,7 +453,7 @@ void HookManager::handle_response(const std::string& output,
         response = json::parse(output);
     } catch (const json::parse_error& e) {
         // Not JSON — just log it. This is fine for scripts that don't respond.
-        std::cerr << "[jami-sdk:hook] Output (not JSON): "
+        std::cerr << "[jami-bridge:hook] Output (not JSON): "
                   << output.substr(0, 200) << std::endl;
         return;
     }
@@ -445,11 +463,11 @@ void HookManager::handle_response(const std::string& output,
     // Handle "reply" — send a single message back
     if (response.contains("reply") && response["reply"].is_string()) {
         if (account_id.empty() || conv_id.empty()) {
-            std::cerr << "[jami-sdk:hook] Cannot reply: missing accountId or conversationId" << std::endl;
+            std::cerr << "[jami-bridge:hook] Cannot reply: missing accountId or conversationId" << std::endl;
             return;
         }
         std::string reply_text = response["reply"].get<std::string>();
-        std::cerr << "[jami-sdk:hook] Reply: " << reply_text.substr(0, 100) << std::endl;
+        std::cerr << "[jami-bridge:hook] Reply: " << reply_text.substr(0, 100) << std::endl;
         client_.send_message(account_id, conv_id, reply_text);
         client_.stats().hook_replies++;
         sent_reply = true;
@@ -458,7 +476,7 @@ void HookManager::handle_response(const std::string& output,
     // Handle "replies" — send multiple messages back
     if (response.contains("replies") && response["replies"].is_array()) {
         if (account_id.empty() || conv_id.empty()) {
-            std::cerr << "[jami-sdk:hook] Cannot reply: missing accountId or conversationId" << std::endl;
+            std::cerr << "[jami-bridge:hook] Cannot reply: missing accountId or conversationId" << std::endl;
             return;
         }
         for (const auto& r : response["replies"]) {
@@ -472,7 +490,7 @@ void HookManager::handle_response(const std::string& output,
 
     if (!sent_reply && !response.contains("reply") && !response.contains("replies")) {
         // Valid JSON but no reply field — that's OK, just log
-        std::cerr << "[jami-sdk:hook] JSON response (no reply): "
+        std::cerr << "[jami-bridge:hook] JSON response (no reply): "
                   << output.substr(0, 200) << std::endl;
     }
 }

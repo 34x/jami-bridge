@@ -1,3 +1,21 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /// @file server.cpp
 /// @brief HTTP REST server for Jami messaging and conversations.
 ///
@@ -109,13 +127,13 @@ void Server::setup_routes(httplib::Server* svr) {
 
     // ── Health ──────────────────────────────────────────────────────
     svr->Get("/api/ping", [](const httplib::Request&, httplib::Response& res) {
-        json_ok(res, json{{"status", "ok"}, {"version", "0.1.0"}});
+        json_ok(res, json{{"status", "ok"}, {"version", "0.2.0"}});
     });
 
     // ── Version ────────────────────────────────────────────────────
     svr->Get("/api/version", [](const httplib::Request&, httplib::Response& res) {
         json_ok(res, json{
-            {"version", "0.1.0"},
+            {"version", "0.2.0"},
             {"daemon", "jami"},
             {"mode", "library"},
             {"api", "REST+STDIO+CLI+hook"},
@@ -502,90 +520,6 @@ void Server::setup_routes(httplib::Server* svr) {
         json_ok(res, json{{"account_id", account_id}, {"contacts", arr}});
     });
 
-    // ── File Transfers ──────────────────────────────────────────────────
-
-    // Send file to a conversation
-    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files)", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string account_id = req.matches[1];
-        std::string conv_id = req.matches[2];
-        try {
-            auto body = json::parse(req.body);
-            auto path = body.at("path").get<std::string>();
-            auto display_name = body.value("displayName", "");
-            auto reply_to = body.value("replyTo", "");
-            client_.send_file(account_id, conv_id, path, display_name, reply_to);
-            json_ok(res, json{{"sent", true}, {"conversation_id", conv_id}, {"path", path}});
-        } catch (const std::exception& e) {
-            json_error(res, 400, std::string("Invalid request: ") + e.what());
-        }
-    });
-
-    // Download file from a conversation
-    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/download)", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string account_id = req.matches[1];
-        std::string conv_id = req.matches[2];
-        try {
-            auto body = json::parse(req.body);
-            auto interaction_id = body.at("interactionId").get<std::string>();
-            auto file_id = body.at("fileId").get<std::string>();
-            auto download_path = body.at("path").get<std::string>();
-            bool ok = client_.download_file(account_id, conv_id, interaction_id, file_id, download_path);
-            json_ok(res, json{{"downloading", ok}, {"conversation_id", conv_id}, {"path", download_path}});
-        } catch (const std::exception& e) {
-            json_error(res, 400, std::string("Invalid request: ") + e.what());
-        }
-    });
-
-    // Cancel file transfer
-    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/cancel)", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string account_id = req.matches[1];
-        std::string conv_id = req.matches[2];
-        try {
-            auto body = json::parse(req.body);
-            auto file_id = body.at("fileId").get<std::string>();
-            auto err = client_.cancel_data_transfer(account_id, conv_id, file_id);
-            json_ok(res, json{{"cancelled", err == libjami::DataTransferError::success},
-                               {"error_code", static_cast<int>(err)}});
-        } catch (const std::exception& e) {
-            json_error(res, 400, std::string("Invalid request: ") + e.what());
-        }
-    });
-
-    // Get file transfer info
-    svr->Get(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string account_id = req.matches[1];
-        std::string conv_id = req.matches[2];
-        std::string file_id = req.matches[3];
-        jami::FileTransfer info;
-        bool found = client_.file_transfer_info(account_id, conv_id, file_id, info);
-        if (!found) {
-            json_error(res, 404, "Transfer not found: " + file_id);
-            return;
-        }
-        json_ok(res, json{
-            {"account_id", account_id},
-            {"conversation_id", conv_id},
-            {"file_id", file_id},
-            {"path", info.path},
-            {"total_size", info.total_size},
-            {"bytes_progress", info.bytes_progress},
-            {"event_code", info.event_code},
-        });
-    });
-
-    // Set account enabled/disabled
-    svr->Post(R"(/api/accounts/([^/]+)/enabled)", [this](const httplib::Request& req, httplib::Response& res) {
-        std::string account_id = req.matches[1];
-        try {
-            auto body = json::parse(req.body);
-            bool enabled = body.at("enabled").get<bool>();
-            client_.set_account_active(account_id, enabled);
-            json_ok(res, json{{"account_id", account_id}, {"enabled", enabled}});
-        } catch (const std::exception& e) {
-            json_error(res, 400, std::string("Invalid request: ") + e.what());
-        }
-    });
-
     // Set account active/inactive
     svr->Post(R"(/api/accounts/([^/]+)/active)", [this](const httplib::Request& req, httplib::Response& res) {
         std::string account_id = req.matches[1];
@@ -622,10 +556,10 @@ void Server::run() {
     svr_ = &svr;
     running_ = true;
 
-    std::cout << "[jami-sdk] HTTP server listening on " << host_ << ":" << port_ << std::endl;
+    std::cout << "[jami-bridge] HTTP server listening on " << host_ << ":" << port_ << std::endl;
 
     if (!svr.listen(host_, port_)) {
-        std::cerr << "[jami-sdk] Failed to bind " << host_ << ":" << port_ << std::endl;
+        std::cerr << "[jami-bridge] Failed to bind " << host_ << ":" << port_ << std::endl;
     }
     running_ = false;
     svr_ = nullptr;

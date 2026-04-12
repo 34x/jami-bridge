@@ -5,19 +5,19 @@ The simplest possible Jami bot — a shell script that echoes messages back.
 ## Usage
 
 ```bash
-# Make sure jami-sdk is in PATH or specify full path
-cd jami-sdk-dist
+# Make sure jami-bridge is in PATH or specify full path
+cd jami-bridge-dist
 
 # Run with echo bot
-./jami-sdk --hook ../examples/echo-bot/echo-bot.sh
+./jami-bridge --hook ../examples/echo-bot/echo-bot.sh
 
 # Or with HTTP server also running
-./jami-sdk --port 8090 --hook ../examples/echo-bot/echo-bot.sh
+./jami-bridge --port 8090 --hook ../examples/echo-bot/echo-bot.sh
 ```
 
 ## How It Works
 
-1. `jami-sdk --hook` runs the daemon and waits for events
+1. `jami-bridge --hook` runs the daemon and waits for events
 2. When a message arrives, it spawns `echo-bot.sh`
 3. The script reads `$JAMI_EVENT` (full event JSON)
 4. It prints `{"reply": "..."}` to stdout

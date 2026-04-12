@@ -1,4 +1,4 @@
-# Cross-compile jami-daemon and jami-sdk for Windows (x86_64) using MinGW.
+# Cross-compile jami-daemon and jami-bridge for Windows (x86_64) using MinGW.
 #
 # This is experimental and may require manual fixes.
 # The daemon's contrib system supports MinGW cross-compilation via:
@@ -6,13 +6,13 @@
 #
 # Status: IN PROGRESS — produces a Windows .exe but runtime testing needed.
 #
-# Build: podman build -t jami-sdk-win64 -f Containerfile.mingw .
+# Build: podman build -t jami-bridge-win64 -f Containerfile.mingw .
 #
 # The approach:
 #   1. Install MinGW cross-compiler toolchain on Fedora
 #   2. Build jami-daemon contrib deps for Windows
 #   3. Build jami-daemon with meson cross-file
-#   4. Cross-compile jami-sdk against the Windows daemon
+#   4. Cross-compile jami-bridge against the Windows daemon
 #   5. Package as .zip with all needed DLLs
 
 FROM fedora:43 AS builder
@@ -58,10 +58,10 @@ RUN mkdir -p build-win64 && cd build-win64 && \
     ninja && \
     ninja install || true
 
-# ── Stage 2: Cross-compile jami-sdk ───────────────────────────────────
+# ── Stage 2: Cross-compile jami-bridge ───────────────────────────────────
 # (This stage depends on stage 1 succeeding)
 #
-# TODO: Once daemon builds for Windows, compile jami-sdk against it.
+# TODO: Once daemon builds for Windows, compile jami-bridge against it.
 # The SDK has minimal platform-specific code (just POSIX fork/exec in hook.cpp)
 # which needs a Windows alternative (CreateProcess).
 

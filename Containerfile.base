@@ -5,7 +5,7 @@
 # -Dinterfaces=library which produces libjami.so with exported symbols.
 #
 # Build from repo root (where daemon/ submodule lives):
-#   podman build -t jami-sdk-base -f Containerfile.base .
+#   podman build -t jami-bridge-base -f Containerfile.base .
 #
 # If daemon submodule is not available, you can clone it first:
 #   git submodule update --init

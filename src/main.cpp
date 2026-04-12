@@ -1,5 +1,23 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /// @file main.cpp
-/// @brief Entry point for jami-sdk — HTTP, STDIO, or CLI mode.
+/// @brief Entry point for jami-bridge — HTTP, STDIO, or CLI mode.
 ///
 /// All configuration is explicit: CLI args, config file, or environment
 /// variables. No guessing — every default can be overridden.
@@ -93,14 +111,14 @@ static void print_bot_identity(jami::Client& client, const std::string& account_
 
     // If still empty, wait for registration (up to 10s)
     if (username.empty()) {
-        std::cerr << "[jami-sdk] Waiting for Jami URI..." << std::endl;
+        std::cerr << "[jami-bridge] Waiting for Jami URI..." << std::endl;
         username = wait_for_jami_uri(client, account_id);
     }
 
-    std::cerr << "[jami-sdk] Bot identity: " << username
+    std::cerr << "[jami-bridge] Bot identity: " << username
               << " (account: " << account_id
               << ", alias: " << alias << ")" << std::endl;
-    std::cerr << "[jami-sdk] Add this bot to a group: invite " << username << std::endl;
+    std::cerr << "[jami-bridge] Add this bot to a group: invite " << username << std::endl;
 }
 
 /// Resolve which account to use based on config.
@@ -116,12 +134,12 @@ static std::string resolve_account(jami::Client& client, const jami::Config& cfg
         // It's an account ID — verify it exists
         for (const auto& id : accounts) {
             if (id == cfg.account) {
-                std::cerr << "[jami-sdk] Using account: " << cfg.account << std::endl;
+                std::cerr << "[jami-bridge] Using account: " << cfg.account << std::endl;
                 return cfg.account;
             }
         }
-        std::cerr << "[jami-sdk] Error: Account not found: " << cfg.account << std::endl;
-        std::cerr << "[jami-sdk] Available accounts:" << std::endl;
+        std::cerr << "[jami-bridge] Error: Account not found: " << cfg.account << std::endl;
+        std::cerr << "[jami-bridge] Available accounts:" << std::endl;
         for (const auto& id : accounts) {
             auto details = client.account_details(id);
             std::cerr << "  " << id
@@ -139,28 +157,28 @@ static std::string resolve_account(jami::Client& client, const jami::Config& cfg
 
         if (file_exists(path)) {
             // Existing archive — import it
-            std::cerr << "[jami-sdk] Importing account from: " << path << std::endl;
+            std::cerr << "[jami-bridge] Importing account from: " << path << std::endl;
             std::string account_id = client.import_account(path, cfg.account_password);
             if (account_id.empty()) {
-                std::cerr << "[jami-sdk] Error: Failed to import account" << std::endl;
+                std::cerr << "[jami-bridge] Error: Failed to import account" << std::endl;
                 return "";
             }
-            std::cerr << "[jami-sdk] Imported account: " << account_id << std::endl;
+            std::cerr << "[jami-bridge] Imported account: " << account_id << std::endl;
             return account_id;
         } else {
             // Path doesn't exist — create new account and export it
-            std::cerr << "[jami-sdk] Creating new account (archive will be saved to: " << path << ")" << std::endl;
+            std::cerr << "[jami-bridge] Creating new account (archive will be saved to: " << path << ")" << std::endl;
             std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
-            std::cerr << "[jami-sdk] Created account: " << account_id << std::endl;
+            std::cerr << "[jami-bridge] Created account: " << account_id << std::endl;
 
             // Wait for the account to be ready before exporting
             std::this_thread::sleep_for(std::chrono::seconds(3));
 
             bool exported = client.export_account(account_id, path, cfg.account_password);
             if (exported) {
-                std::cerr << "[jami-sdk] Account exported to: " << path << std::endl;
+                std::cerr << "[jami-bridge] Account exported to: " << path << std::endl;
             } else {
-                std::cerr << "[jami-sdk] Warning: Failed to export account to " << path << std::endl;
+                std::cerr << "[jami-bridge] Warning: Failed to export account to " << path << std::endl;
             }
             return account_id;
         }
@@ -168,9 +186,9 @@ static std::string resolve_account(jami::Client& client, const jami::Config& cfg
 
     // Create new account explicitly requested
     if (cfg.account == "new") {
-        std::cerr << "[jami-sdk] Creating new account (alias: " << cfg.account_alias << ")..." << std::endl;
+        std::cerr << "[jami-bridge] Creating new account (alias: " << cfg.account_alias << ")..." << std::endl;
         std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
-        std::cerr << "[jami-sdk] Created account: " << account_id << std::endl;
+        std::cerr << "[jami-bridge] Created account: " << account_id << std::endl;
         return account_id;
     }
 
@@ -180,16 +198,16 @@ static std::string resolve_account(jami::Client& client, const jami::Config& cfg
         auto details = client.account_details(id);
         std::string alias = details.count("Account.alias") ? details["Account.alias"] : "";
         std::string username = details.count("Account.username") ? details["Account.username"] : "";
-        std::cerr << "[jami-sdk] Auto-detected account: " << id
+        std::cerr << "[jami-bridge] Auto-detected account: " << id
                   << " (alias: " << alias << ", username: " << username << ")" << std::endl;
         return id;
     }
 
     // No accounts exist — create one
-    std::cerr << "[jami-sdk] No accounts found. Creating new account (alias: "
+    std::cerr << "[jami-bridge] No accounts found. Creating new account (alias: "
               << cfg.account_alias << ")..." << std::endl;
     std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
-    std::cerr << "[jami-sdk] Created account: " << account_id << std::endl;
+    std::cerr << "[jami-bridge] Created account: " << account_id << std::endl;
     return account_id;
 }
 
@@ -425,7 +443,7 @@ int main(int argc, char* argv[]) {
     } else {
         // HTTP mode: log events to stderr
         events.on_message_received = [](const jami::Message& msg) {
-            std::cerr << "[jami-sdk] Message received: "
+            std::cerr << "[jami-bridge] Message received: "
                       << "from=" << msg.from << " "
                       << "conv=" << msg.conversation_id << " "
                       << "body=\"" << msg.body << "\""
@@ -435,7 +453,7 @@ int main(int argc, char* argv[]) {
                                             const std::string& state,
                                             int code,
                                             const std::string& detail) {
-            std::cerr << "[jami-sdk] Registration: "
+            std::cerr << "[jami-bridge] Registration: "
                       << "account=" << account_id << " "
                       << "state=" << state << " "
                       << "code=" << code << std::endl;
@@ -446,14 +464,14 @@ int main(int argc, char* argv[]) {
             std::string from;
             auto it = meta.find("from");
             if (it != meta.end()) from = it->second;
-            std::cerr << "[jami-sdk] Conversation request: "
+            std::cerr << "[jami-bridge] Conversation request: "
                       << "account=" << account_id << " "
                       << "conv=" << conv_id << " "
                       << "from=" << (from.empty() ? "(unknown)" : from) << std::endl;
         };
         events.on_conversation_ready = [](const std::string& account_id,
                                            const std::string& conv_id) {
-            std::cerr << "[jami-sdk] Conversation ready: "
+            std::cerr << "[jami-bridge] Conversation ready: "
                       << "account=" << account_id << " "
                       << "conv=" << conv_id << std::endl;
         };
@@ -462,18 +480,18 @@ int main(int argc, char* argv[]) {
                                                const std::string& peer,
                                                const std::string& message_id,
                                                int state) {
-            std::cerr << "[jami-sdk] Message status: "
+            std::cerr << "[jami-bridge] Message status: "
                       << "msg=" << message_id << " "
                       << "state=" << state << std::endl;
         };
         events.on_trust_request_received = [](const std::string& account_id,
                                                 const std::string& from_uri,
                                                 const std::string& conv_id) {
-            std::cerr << "[jami-sdk] Trust request: from=" << from_uri
+            std::cerr << "[jami-bridge] Trust request: from=" << from_uri
                       << " conv=" << conv_id << std::endl;
         };
         events.on_data_transfer_event = [](const jami::FileTransfer& transfer) {
-            std::cerr << "[jami-sdk] Data transfer: "
+            std::cerr << "[jami-bridge] Data transfer: "
                       << "conv=" << transfer.conversation_id << " "
                       << "file=" << transfer.file_id << " "
                       << "event=" << transfer.event_code << " "
@@ -484,7 +502,7 @@ int main(int argc, char* argv[]) {
 
     // ── Initialize daemon ──────────────────────────────────────────────
 
-    std::cerr << "[jami-sdk] Starting..." << std::endl;
+    std::cerr << "[jami-bridge] Starting..." << std::endl;
 
     jami::Client client(events, cfg.debug);
 
@@ -538,12 +556,12 @@ int main(int argc, char* argv[]) {
             }
 
             if (should_accept) {
-                std::cerr << "[jami-sdk] Accepting invite: conv=" << conv_id
+                std::cerr << "[jami-bridge] Accepting invite: conv=" << conv_id
                           << " from=" << (from.empty() ? "(unknown)" : from) << std::endl;
                 client.accept_request(account_id, conv_id);
                 client.stats().invites_accepted++;
             } else if (should_decline) {
-                std::cerr << "[jami-sdk] Declining invite: conv=" << conv_id
+                std::cerr << "[jami-bridge] Declining invite: conv=" << conv_id
                           << " from=" << (from.empty() ? "(unknown)" : from) << std::endl;
                 client.decline_request(account_id, conv_id);
                 client.stats().invites_declined++;
@@ -578,11 +596,11 @@ int main(int argc, char* argv[]) {
             }
 
             if (should_accept) {
-                std::cerr << "[jami-sdk] Accepting trust request from=" << from_uri << std::endl;
+                std::cerr << "[jami-bridge] Accepting trust request from=" << from_uri << std::endl;
                 client.accept_trust_request(account_id, from_uri);
                 client.stats().invites_accepted++;
             } else if (should_decline) {
-                std::cerr << "[jami-sdk] Declining trust request from=" << from_uri << std::endl;
+                std::cerr << "[jami-bridge] Declining trust request from=" << from_uri << std::endl;
                 client.decline_trust_request(account_id, from_uri);
                 client.stats().invites_declined++;
             }
@@ -598,12 +616,12 @@ int main(int argc, char* argv[]) {
 
         // Log the invite policy
         if (cfg.auto_accept == 0) {
-            std::cerr << "[jami-sdk] Invite policy: accept all" << std::endl;
+            std::cerr << "[jami-bridge] Invite policy: accept all" << std::endl;
         } else if (cfg.auto_accept == 1) {
-            std::cerr << "[jami-sdk] Invite policy: accept from owner only ("
+            std::cerr << "[jami-bridge] Invite policy: accept from owner only ("
                       << cfg.auto_accept_from << ")" << std::endl;
         } else if (cfg.auto_accept == 2) {
-            std::cerr << "[jami-sdk] Invite policy: reject all (lockdown)" << std::endl;
+            std::cerr << "[jami-bridge] Invite policy: reject all (lockdown)" << std::endl;
         }
     }
 
@@ -617,13 +635,13 @@ int main(int argc, char* argv[]) {
         hook_manager->install_callbacks(events);
         // Re-register callbacks (install_callbacks modified Events struct)
         client.update_callbacks(events);
-        std::cerr << "[jami-sdk] Hook: " << cfg.hook_command
+        std::cerr << "[jami-bridge] Hook: " << cfg.hook_command
                   << " (events: " << cfg.hook_events
                   << ", timeout: " << cfg.hook_timeout << "s)" << std::endl;
     }
 #else
     if (!cfg.hook_command.empty()) {
-        std::cerr << "[jami-sdk] Error: --hook is not supported on Windows yet. Use STDIO mode." << std::endl;
+        std::cerr << "[jami-bridge] Error: --hook is not supported on Windows yet. Use STDIO mode." << std::endl;
         return 1;
     }
 #endif
@@ -640,7 +658,7 @@ int main(int argc, char* argv[]) {
         std::this_thread::sleep_for(std::chrono::seconds(2));
         resolved_account_id = resolve_account(client, cfg);
         if (resolved_account_id.empty() && !cfg.account.empty() && cfg.account != "new") {
-            std::cerr << "[jami-sdk] Warning: Could not resolve configured account" << std::endl;
+            std::cerr << "[jami-bridge] Warning: Could not resolve configured account" << std::endl;
         }
 
         // Display the bot's Jami identity for easy invites
@@ -665,10 +683,10 @@ int main(int argc, char* argv[]) {
     }
 
     // HTTP mode
-    std::cerr << "[jami-sdk] HTTP server listening on " << cfg.host << ":" << cfg.port << std::endl;
+    std::cerr << "[jami-bridge] HTTP server listening on " << cfg.host << ":" << cfg.port << std::endl;
     jami::Server server(client, cfg.host, cfg.port);
     server.run();
 
-    std::cerr << "[jami-sdk] Shutting down..." << std::endl;
+    std::cerr << "[jami-bridge] Shutting down..." << std::endl;
     _exit(0);
 }

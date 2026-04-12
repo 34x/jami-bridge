@@ -1,24 +1,24 @@
-# Multi-stage build: compiles jami-sdk against the pre-built daemon,
+# Multi-stage build: compiles jami-bridge against the pre-built daemon,
 # then creates a minimal runtime image with a self-contained distribution.
 #
-# Requires: jami-sdk-base image (built with Containerfile.base)
+# Requires: jami-bridge-base image (built with Containerfile.base)
 #
-# Build: podman build -t jami-sdk -f Containerfile .
-#   Run from the jami-sdk repo root (where daemon/ submodule lives).
+# Build: podman build -t jami-bridge -f Containerfile .
+#   Run from the jami-bridge repo root (where daemon/ submodule lives).
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────
-FROM jami-sdk-base AS builder
+FROM jami-bridge-base AS builder
 
 # Install build deps needed for the SDK (but not for the daemon)
 RUN dnf install -y nlohmann-json-devel && dnf clean all
 
-# Copy jami-sdk source
-COPY src/ /build/jami-sdk/src/
-COPY vendor/ /build/jami-sdk/vendor/
-COPY CMakeLists.txt /build/jami-sdk/
+# Copy jami-bridge source
+COPY src/ /build/jami-bridge/src/
+COPY vendor/ /build/jami-bridge/vendor/
+COPY CMakeLists.txt /build/jami-bridge/
 
-# Build jami-sdk against the pre-built libjami.so from the base image
-RUN cd /build/jami-sdk && \
+# Build jami-bridge against the pre-built libjami.so from the base image
+RUN cd /build/jami-bridge && \
     mkdir -p build && cd build && \
     cmake .. \
         -DJAMI_INCLUDE_DIR=/usr/local/include/jami \
@@ -48,7 +48,7 @@ COPY --from=builder /usr/local/lib64/libjami.so.16.0.0 /usr/local/lib64/libjami.
 RUN cd /usr/local/lib64 && ln -sf libjami.so.16.0.0 libjami.so.16 && ln -sf libjami.so.16 libjami.so
 
 # Copy our binary (with RPATH $ORIGIN/lib embedded)
-COPY --from=builder /build/jami-sdk/build/jami-sdk /usr/local/bin/jami-sdk
+COPY --from=builder /build/jami-bridge/build/jami-bridge /usr/local/bin/jami-bridge
 
 # Update library cache
 RUN ldconfig
@@ -64,5 +64,5 @@ ENV XDG_CONFIG_HOME=/home/jami/.config
 
 EXPOSE 8090
 
-ENTRYPOINT ["jami-sdk"]
+ENTRYPOINT ["jami-bridge"]
 CMD ["--host", "0.0.0.0", "--port", "8090"]

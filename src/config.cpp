@@ -1,5 +1,23 @@
+/*
+ *  jami-bridge — Unofficial Jami messaging bridge
+ *  Copyright (C) 2025-2026 Contributors to the jami-bridge project
+ *
+ *  This program is free software: you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation, either version 3 of the License, or
+ *  (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License
+ *  along with this program. If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /// @file config.cpp
-/// @brief Configuration loading and validation for jami-sdk.
+/// @brief Configuration loading and validation for jami-bridge.
 
 #include "config.h"
 
@@ -297,15 +315,15 @@ void Config::apply_daemon_paths() const {
 
     if (!data_dir.empty()) {
         setenv("XDG_DATA_HOME", data_dir.c_str(), 1);
-        std::cerr << "[jami-sdk] Data dir: " << data_dir << std::endl;
+        std::cerr << "[jami-bridge] Data dir: " << data_dir << std::endl;
     }
     if (!config_dir.empty()) {
         setenv("XDG_CONFIG_HOME", config_dir.c_str(), 1);
-        std::cerr << "[jami-sdk] Config dir: " << config_dir << std::endl;
+        std::cerr << "[jami-bridge] Config dir: " << config_dir << std::endl;
     }
     if (!cache_dir.empty()) {
         setenv("XDG_CACHE_HOME", cache_dir.c_str(), 1);
-        std::cerr << "[jami-sdk] Cache dir: " << cache_dir << std::endl;
+        std::cerr << "[jami-bridge] Cache dir: " << cache_dir << std::endl;
     }
 }
 
@@ -382,7 +400,7 @@ int Config::validate() const {
         // If the file exists, the account will be imported.
         // If it doesn't, a new account will be created and exported to that path.
         // This enables the create-or-reuse pattern:
-        //   jami-sdk --account /tmp/bot.gz  (first run: create, subsequent: import)
+        //   jami-bridge --account /tmp/bot.gz  (first run: create, subsequent: import)
     }
 
     return 0;
