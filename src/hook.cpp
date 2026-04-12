@@ -254,12 +254,13 @@ HookManager::HookManager(Client& client, const std::string& command,
         else if (token == "onTrustRequestReceived" || token == "all") handle_trust_request_ = true;
         else if (token == "onRegistrationChanged" || token == "all") handle_registration_changed_ = true;
         else if (token == "onConversationReady" || token == "all") handle_conversation_ready_ = true;
+        else if (token == "onConversationMemberEvent" || token == "all") handle_conversation_member_event_ = true;
         else if (token == "onMessageStatusChanged" || token == "all") handle_message_status_changed_ = true;
         else if (!token.empty()) {
             std::cerr << "[jami-bridge:hook] Unknown event type: " << token
                       << " (supported: onMessageReceived, onConversationRequestReceived,"
                       << " onTrustRequestReceived, onRegistrationChanged, onConversationReady,"
-                      << " onMessageStatusChanged, all)" << std::endl;
+                      << " onConversationMemberEvent, onMessageStatusChanged, all)" << std::endl;
         }
 
         if (comma == std::string::npos) break;
@@ -348,6 +349,27 @@ void HookManager::install_callbacks(Events& events) {
             event_json["conversationId"] = conv_id;
 
             dispatch("onConversationReady", event_json.dump(),
+                     account_id, conv_id);
+        };
+    }
+
+    if (handle_conversation_member_event_) {
+        auto orig_cb = events.on_conversation_member_event;
+        events.on_conversation_member_event =
+            [this, orig_cb](const std::string& account_id,
+                           const std::string& conv_id,
+                           const std::string& member_uri,
+                           int event) {
+            if (orig_cb) orig_cb(account_id, conv_id, member_uri, event);
+
+            json event_json;
+            event_json["type"] = "onConversationMemberEvent";
+            event_json["accountId"] = account_id;
+            event_json["conversationId"] = conv_id;
+            event_json["memberUri"] = member_uri;
+            event_json["event"] = event;
+
+            dispatch("onConversationMemberEvent", event_json.dump(),
                      account_id, conv_id);
         };
     }

@@ -389,6 +389,22 @@ int main(int argc, char* argv[]) {
             };
             std::cout << notification.dump() << std::endl;
         };
+        events.on_conversation_member_event = [](const std::string& account_id,
+                                                    const std::string& conv_id,
+                                                    const std::string& member_uri,
+                                                    int event) {
+            json notification;
+            notification["jsonrpc"] = "2.0";
+            notification["method"] = "onConversationMemberEvent";
+            // event: 0 = add, 1 = joins, 2 = leave, 3 = banned
+            notification["params"] = {
+                {"accountId", account_id},
+                {"conversationId", conv_id},
+                {"memberUri", member_uri},
+                {"event", event},
+            };
+            std::cout << notification.dump() << std::endl;
+        };
         events.on_message_status_changed = [](const std::string& account_id,
                                                const std::string& conversation_id,
                                                const std::string& peer,
@@ -474,6 +490,22 @@ int main(int argc, char* argv[]) {
             std::cerr << "[jami-bridge] Conversation ready: "
                       << "account=" << account_id << " "
                       << "conv=" << conv_id << std::endl;
+        };
+        events.on_conversation_member_event = [](const std::string& account_id,
+                                                    const std::string& conv_id,
+                                                    const std::string& member_uri,
+                                                    int event) {
+            const char* action = "unknown";
+            switch (event) {
+                case 0: action = "added"; break;
+                case 1: action = "joined"; break;
+                case 2: action = "left"; break;
+                case 3: action = "banned"; break;
+            }
+            std::cerr << "[jami-bridge] Member event: "
+                      << "conv=" << conv_id << " "
+                      << "member=" << member_uri << " "
+                      << "action=" << action << std::endl;
         };
         events.on_message_status_changed = [](const std::string& account_id,
                                                const std::string& conversation_id,

@@ -109,6 +109,7 @@ private:
     bool handle_trust_request_ = false;
     bool handle_registration_changed_ = false;
     bool handle_conversation_ready_ = false;
+    bool handle_conversation_member_event_ = false;
     bool handle_message_status_changed_ = false;
 
     /// Dispatch an event to the hook command.

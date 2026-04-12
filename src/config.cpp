@@ -79,6 +79,7 @@ void Config::print_usage(const char* prog) const {
               << "  --hook CMD           Command to execute on events (via /bin/sh -c)\n"
               << "  --hook-events E      Comma-separated event types (default: onMessageReceived)\n"
               << "                       Supported: onMessageReceived, onConversationReady,\n"
+              << "                                  onConversationMemberEvent,\n"
               << "                                  onConversationRequestReceived,\n"
               << "                                  onTrustRequestReceived,\n"
               << "                                  onRegistrationChanged, onMessageStatusChanged,\n"
