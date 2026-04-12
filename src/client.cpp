@@ -260,6 +260,11 @@ std::map<std::string, std::string> Client::account_details(const std::string& ac
     return libjami::getAccountDetails(account_id);
 }
 
+void Client::set_account_details(const std::string& account_id,
+                                   const std::map<std::string, std::string>& details) {
+    libjami::setAccountDetails(account_id, details);
+}
+
 std::map<std::string, std::string> Client::account_volatile_details(const std::string& account_id) const {
     return libjami::getVolatileAccountDetails(account_id);
 }

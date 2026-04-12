@@ -28,6 +28,7 @@
 ///   listAccounts                     — list account IDs
 ///   createAccount    {alias,password} — create account
 ///   getAccountDetails {accountId}    — account details
+///   setAccountDetails {accountId,details} — update account details (alias, etc.)
 ///   getAccountStatus  {accountId}    — volatile status
 ///   removeAccount    {accountId}     — remove account
 ///   listConversations {accountId}    — list conversations
@@ -235,6 +236,18 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         std::string account_id = params.at("accountId");
         auto details = client_.account_volatile_details(account_id);
         return make_result({{"accountId", account_id}, {"status", map_to_json(details)}});
+    }
+
+    if (method == "setAccountDetails") {
+        std::string account_id = params.at("accountId");
+        std::map<std::string, std::string> details;
+        if (params.contains("details") && params["details"].is_object()) {
+            for (auto& [k, v] : params["details"].items()) {
+                details[k] = v.get<std::string>();
+            }
+        }
+        client_.set_account_details(account_id, details);
+        return make_result({{"updated", true}, {"accountId", account_id}});
     }
 
     if (method == "removeAccount") {

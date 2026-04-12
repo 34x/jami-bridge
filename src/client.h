@@ -150,6 +150,10 @@ public:
     /// Get account details (type, username, etc.).
     std::map<std::string, std::string> account_details(const std::string& account_id) const;
 
+    /// Set account details (e.g. alias, displayName).
+    void set_account_details(const std::string& account_id,
+                              const std::map<std::string, std::string>& details);
+
     /// Get volatile details (registration status, etc.).
     std::map<std::string, std::string> account_volatile_details(const std::string& account_id) const;
 
