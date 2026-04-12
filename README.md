@@ -526,6 +526,47 @@ All compilation happens inside Podman containers — **nothing is built on the h
 - Podman (or Docker with equivalent commands)
 - ~5 GB disk space for the base image
 
+### Development workflow (recommended)
+
+The fastest way to iterate on the SDK. Source is mounted from the host,
+so only changed files are recompiled. The binary is tested in a lightweight
+runtime container — no image rebuild or dist packaging needed.
+
+```bash
+# One-time: build the base image (~10-20 min)
+./build.sh base
+
+# Compile the SDK (seconds on rebuild, ~30s first time)
+./build.sh dev
+
+# Run the dev binary in a fresh runtime container
+./build.sh dev-run
+
+# Run on a different port
+./build.sh dev-run --port 8091
+
+# Open a shell in the dev container (for调试, manual cmake, etc.)
+./build.sh dev-shell
+
+# Stop the dev container when done
+./build.sh dev-kill
+```
+
+**How it works:**
+
+1. `dev` keeps a persistent container running with source bind-mounted
+2. Only changed `.cpp` files are recompiled (incremental make)
+3. `dev-run` copies the fresh binary + bundled libs into `dev-dist/`,
+   then mounts that directory into a minimal Fedora runtime container
+4. The bundled libs are copied once (240 MB) — subsequent runs only
+   copy the ~3.5 MB binary
+
+**Iterative cycle:** edit source → `./build.sh dev` → `./build.sh dev-run`
+
+### Production builds
+
+Full image builds — slower but produces the standalone distribution.
+
 ### Build targets
 
 ```bash

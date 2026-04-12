@@ -1,6 +1,7 @@
 # Build artifacts
 build/
 dist/
+dev-dist/
 jami-sdk-dist-output/
 jami-sdk-dist/
 

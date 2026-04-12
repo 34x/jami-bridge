@@ -11,12 +11,15 @@
 #
 # Development builds (fast, incremental, source mounted):
 #   ./build.sh dev         — Build or rebuild SDK in dev container (fast!)
+#   ./build.sh dev-run     — Run the dev binary in a fresh runtime container
 #   ./build.sh dev-shell   — Open a shell in the dev container
 #   ./build.sh dev-clean   — Remove dev build directory
 #   ./build.sh dev-kill    — Stop and remove the dev container
 #
 # The dev workflow keeps a persistent container running. Source is mounted
 # from the host, so only the SDK binary is rebuilt — not the 4GB daemon.
+# Use 'dev-run' to test the binary in a clean runtime container — no
+# image rebuild or dist packaging needed.
 
 set -e
 
@@ -27,6 +30,7 @@ BUILD_CONTEXT="$SCRIPT_DIR"
 IMAGE_BASE="jami-sdk-base"
 IMAGE_SDK="jami-sdk"
 IMAGE_DEV="jami-sdk-dev"
+IMAGE_RUNTIME="jami-sdk-runtime"
 DEV_CONTAINER="jami-sdk-dev"
 SDK_SOURCE="$SCRIPT_DIR"  # jami-sdk/ directory on host
 BUILD_DIR="$SDK_SOURCE/build"  # build/ on host, mounted into container
@@ -187,6 +191,80 @@ dev_shell() {
     podman exec -it "$DEV_CONTAINER" bash
 }
 
+# ── Runtime image (minimal Fedora + system libs, for dev-run) ───────────
+#
+# This is a small image (~200MB) with just the runtime dependencies.
+# The SDK binary and bundled libs are mounted at runtime, so this
+# image never needs rebuilding — it's just the OS + system .so files.
+
+dev_ensure_runtime() {
+    if ! podman image exists localhost/$IMAGE_RUNTIME 2>/dev/null; then
+        echo "=== Building runtime image (one-time, ~200MB) ==="
+        podman build -t "$IMAGE_RUNTIME" -f "$SCRIPT_DIR/Containerfile.runtime" "$SCRIPT_DIR"
+    fi
+}
+
+dev_run() {
+    dev_ensure_container
+    dev_ensure_runtime
+
+    # Verify the binary exists
+    if [ ! -f "$BUILD_DIR/jami-sdk" ]; then
+        echo "ERROR: No binary found. Run './build.sh dev' first."
+        exit 1
+    fi
+
+    # Create a dist-like directory from the dev binary + base image libs
+    local dev_dist="$SCRIPT_DIR/dev-dist"
+    mkdir -p "$dev_dist/lib"
+
+    # Copy the fresh binary (only ~3.5MB, fast)
+    cp "$BUILD_DIR/jami-sdk" "$dev_dist/jami-sdk"
+    chmod +x "$dev_dist/jami-sdk"
+
+    # Copy bundled libs from the dev container (only needed once)
+    if [ ! -f "$dev_dist/lib/libjami.so.16.0.0" ]; then
+        echo "=== Copying bundled libs from dev container (one-time) ==="
+        podman exec "$DEV_CONTAINER" bash -c '
+            mkdir -p /tmp/dev-dist/lib
+            cp /usr/local/lib64/libjami.so.16.0.0 /tmp/dev-dist/lib/
+            cp /usr/lib64/libgit2.so.1.9.2 /tmp/dev-dist/lib/
+            cp /usr/lib64/libsecp256k1.so.5.0.0 /tmp/dev-dist/lib/
+            cp /usr/lib64/libllhttp.so.9.3.1 /tmp/dev-dist/lib/
+            cd /tmp/dev-dist/lib
+            ln -sf libjami.so.16.0.0 libjami.so.16
+            ln -sf libjami.so.16 libjami.so
+            ln -sf libgit2.so.1.9.2 libgit2.so.1.9
+            ln -sf libsecp256k1.so.5.0.0 libsecp256k1.so.5
+            ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
+            patchelf --set-rpath \$ORIGIN libjami.so.16.0.0 2>/dev/null || true
+            patchelf --set-rpath \$ORIGIN libgit2.so.1.9.2 2>/dev/null || true
+            patchelf --set-rpath \$ORIGIN libsecp256k1.so.5.0.0 2>/dev/null || true
+            patchelf --set-rpath \$ORIGIN libllhttp.so.9.3.1 2>/dev/null || true
+        '
+        podman cp "$DEV_CONTAINER":/tmp/dev-dist/lib/. "$dev_dist/lib/"
+        echo "=== Bundled libs copied ==="
+    fi
+
+    # Run the dev binary in a fresh runtime container with the dist mounted
+    # Pass any extra args to jami-sdk
+    # Parse --port from args for port mapping (default 8090)
+    local run_port=8090
+    for arg in "$@"; do
+        if [[ "$prev" == "--port" ]] || [[ "$arg" == --port=* ]]; then
+            run_port="${arg#--port=}"
+        fi
+        prev="$arg"
+    done
+
+    echo "=== Running dev binary in runtime container (port $run_port) ==="
+    podman run --rm \
+        -p "$run_port:$run_port" \
+        -v "$dev_dist:/opt/jami-sdk:Z" \
+        localhost/$IMAGE_RUNTIME \
+        /opt/jami-sdk/jami-sdk "${@:- --host 0.0.0.0 --port 8090}"
+}
+
 dev_kill() {
     if podman container exists "$DEV_CONTAINER" 2>/dev/null; then
         podman rm -f "$DEV_CONTAINER" 2>/dev/null || true
@@ -332,6 +410,10 @@ case "${1:-help}" in
     dev-shell)
         dev_shell
         ;;
+    dev-run)
+        shift
+        dev_run "$@"
+        ;;
     dev-kill)
         dev_kill
         ;;
@@ -364,6 +446,7 @@ case "${1:-help}" in
         echo ""
         echo "Development builds (incremental, source mounted, fast):"
         echo "  dev           Build/rebuild SDK in dev container (seconds!)"
+        echo "  dev-run       Run dev binary in a fresh runtime container"
         echo "  dev-shell     Open a shell in the dev container"
         echo "  dev-kill      Stop and remove the dev container"
         echo "  dev-clean     Remove build directory and dev container"

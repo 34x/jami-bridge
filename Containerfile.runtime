@@ -1,0 +1,35 @@
+# Minimal runtime image for jami-sdk development.
+# Contains only the system libraries needed by libjami.so and the SDK.
+# The SDK binary and bundled libs are mounted at runtime from the host.
+#
+# This image is built once and reused by './build.sh dev-run'.
+# Size: ~200MB (vs 4GB for the dev image, 765MB for the production image).
+
+FROM fedora:43
+
+RUN dnf install -y \
+    gnutls nettle opus speexdsp \
+    yaml-cpp jsoncpp fmt \
+    libuuid libargon2 libarchive \
+    openssl-libs \
+    alsa-lib \
+    libgit2 libsecp256k1 \
+    libva libvdpau mesa-libGL \
+    libX11 libXext libXfixes \
+    pipewire-libs pulseaudio-libs \
+    dbus-libs msgpack sqlite-libs \
+    pcre2 expat \
+    && dnf clean all
+
+# Create non-root user for running the SDK
+RUN useradd -m jami && \
+    mkdir -p /home/jami/.local/share/jami /home/jami/.config/jami && \
+    chown -R jami:jami /home/jami
+
+USER jami
+ENV XDG_DATA_HOME=/home/jami/.local/share
+ENV XDG_CONFIG_HOME=/home/jami/.config
+
+WORKDIR /opt/jami-sdk
+
+CMD ["./jami-sdk"]
