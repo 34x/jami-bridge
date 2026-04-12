@@ -276,7 +276,13 @@ void Client::remove_account(const std::string& account_id) {
 void Client::update_profile(const std::string& account_id,
                              const std::string& display_name,
                              const std::string& avatar) {
-    libjami::updateProfile(account_id, display_name, avatar, "png", 0);
+    // fileType empty = only update displayName, skip avatar
+    // flag=1 = avatar is raw base64 data
+    if (avatar.empty()) {
+        libjami::updateProfile(account_id, display_name, "", "", 0);
+    } else {
+        libjami::updateProfile(account_id, display_name, avatar, "png", 1);
+    }
 }
 
 bool Client::export_account(const std::string& account_id,
