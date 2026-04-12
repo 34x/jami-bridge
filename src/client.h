@@ -195,6 +195,12 @@ public:
                               const std::string& body,
                               const std::string& parent_id = "");
 
+    /// Edit a previously sent message. Returns the new message ID.
+    std::string edit_message(const std::string& account_id,
+                              const std::string& conv_id,
+                              const std::string& new_body,
+                              const std::string& edited_id);
+
     /// Load conversation messages (triggers on_messages_loaded callback).
     uint32_t load_messages(const std::string& account_id,
                             const std::string& conv_id,

@@ -330,6 +330,17 @@ std::string Client::send_message(const std::string& account_id,
     return "";
 }
 
+std::string Client::edit_message(const std::string& account_id,
+                                  const std::string& conv_id,
+                                  const std::string& new_body,
+                                  const std::string& edited_id) {
+    stats_.messages_sent++;
+    // libjami::sendMessage with flag=1 means edit
+    // The "message" is the new body, "commitId" is the ID of the message being edited
+    libjami::sendMessage(account_id, conv_id, new_body, edited_id, 1);
+    return "";
+}
+
 uint32_t Client::load_messages(const std::string& account_id,
                                 const std::string& conv_id,
                                 const std::string& from_id,

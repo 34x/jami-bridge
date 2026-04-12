@@ -18,6 +18,7 @@
 ///   removeConversation {accountId,conversationId} — leave
 ///   inviteMember     {accountId,conversationId,uri} — invite
 ///   sendMessage      {accountId,conversationId,body} — send message
+///   editMessage      {accountId,conversationId,body,messageId} — edit message
 ///   loadMessages     {accountId,conversationId,count?,from?} — load messages
 ///   acceptRequest    {accountId,conversationId} — accept invite
 ///   declineRequest   {accountId,conversationId} — decline invite
@@ -340,6 +341,15 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         std::string parent_id = params.value("parentId", "");
         client_.send_message(account_id, conv_id, body_str, parent_id);
         return make_result({{"sent", true}, {"conversationId", conv_id}});
+    }
+
+    if (method == "editMessage") {
+        std::string account_id = params.at("accountId");
+        std::string conv_id = params.at("conversationId");
+        std::string new_body = params.at("body");
+        std::string edited_id = params.at("messageId");
+        client_.edit_message(account_id, conv_id, new_body, edited_id);
+        return make_result({{"edited", true}, {"conversationId", conv_id}});
     }
 
     if (method == "loadMessages") {
