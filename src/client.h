@@ -160,6 +160,11 @@ public:
     /// Remove an account.
     void remove_account(const std::string& account_id);
 
+    /// Update account profile (display name, avatar) — pushed to contacts.
+    void update_profile(const std::string& account_id,
+                        const std::string& display_name = "",
+                        const std::string& avatar = "");
+
     /// Export account to a file (for backup/transfer).
     bool export_account(const std::string& account_id,
                          const std::string& path,

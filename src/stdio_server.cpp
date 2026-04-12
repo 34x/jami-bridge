@@ -29,6 +29,7 @@
 ///   createAccount    {alias,password} — create account
 ///   getAccountDetails {accountId}    — account details
 ///   setAccountDetails {accountId,details} — update account details (alias, etc.)
+///   updateProfile     {accountId,displayName?,avatar?} — push display name/avatar to contacts
 ///   getAccountStatus  {accountId}    — volatile status
 ///   removeAccount    {accountId}     — remove account
 ///   listConversations {accountId}    — list conversations
@@ -247,6 +248,14 @@ std::string StdioServer::handle_request(const std::string& json_line) {
             }
         }
         client_.set_account_details(account_id, details);
+        return make_result({{"updated", true}, {"accountId", account_id}});
+    }
+
+    if (method == "updateProfile") {
+        std::string account_id = params.at("accountId");
+        std::string display_name = params.value("displayName", "");
+        std::string avatar = params.value("avatar", "");
+        client_.update_profile(account_id, display_name, avatar);
         return make_result({{"updated", true}, {"accountId", account_id}});
     }
 
