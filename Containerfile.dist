@@ -2,7 +2,7 @@
 # The binary has RPATH $ORIGIN/lib embedded, so it finds libraries
 # in a lib/ directory next to itself. No LD_LIBRARY_PATH needed.
 #
-# Build: podman build -t jami-sdk-dist -f Containerfile.dist <project-root>
+# Build: podman build -t jami-sdk-dist -f Containerfile.dist .
 #
 # Then extract the dist:
 #   podman create --name dist-extract jami-sdk-dist
@@ -17,9 +17,9 @@ FROM jami-sdk-base AS builder
 RUN dnf install -y nlohmann-json-devel && dnf clean all
 
 # Copy jami-sdk source
-COPY jami-sdk/src/ /build/jami-sdk/src/
-COPY jami-sdk/vendor/ /build/jami-sdk/vendor/
-COPY jami-sdk/CMakeLists.txt /build/jami-sdk/
+COPY src/ /build/jami-sdk/src/
+COPY vendor/ /build/jami-sdk/vendor/
+COPY CMakeLists.txt /build/jami-sdk/
 
 # Build jami-sdk with RPATH $ORIGIN/lib
 RUN cd /build/jami-sdk && \

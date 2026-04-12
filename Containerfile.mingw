@@ -35,11 +35,8 @@ ENV PREFIX_WIN=/usr/x86_64-w64-mingw32/sys-root/mingw
 ENV PKG_CONFIG_PATH=${PREFIX_WIN}/lib/pkgconfig:${PREFIX_WIN}/lib/pkgconfig/pkgconfig
 ENV PATH=/usr/x86_64-w64-mingw32/bin:$PATH
 
-# Clone jami-daemon source
-ARG JAMI_VERSION=master
-RUN mkdir -p /build && cd /build && \
-    git clone --depth=1 --branch=${JAMI_VERSION} \
-    https://git.jami.net/savoirfairelinux/jami-daemon.git daemon
+# Copy daemon source from git submodule
+COPY daemon/ /build/daemon/
 
 WORKDIR /build/daemon
 
@@ -50,7 +47,7 @@ RUN mkdir -p contrib/win64 && cd contrib/win64 && \
     make -j$(nproc) || true
 
 # Build daemon with meson cross-compilation
-COPY jami-sdk/cross-files/mingw64.txt /build/daemon/cross-files/mingw64.txt
+COPY cross-files/mingw64.txt /build/daemon/cross-files/mingw64.txt
 
 RUN mkdir -p build-win64 && cd build-win64 && \
     meson setup .. \

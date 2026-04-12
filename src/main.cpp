@@ -18,7 +18,6 @@
 #include "hook.h"
 #endif
 #include "stdio_server.h"
-#include "hook.h"
 #include "config.h"
 
 #include <nlohmann/json.hpp>

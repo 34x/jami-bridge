@@ -3,8 +3,8 @@
 #
 # Requires: jami-sdk-base image (built with Containerfile.base)
 #
-# Build: podman build -t jami-sdk -f Containerfile <project-root>
-#   where <project-root> contains both daemon/ and jami-sdk/
+# Build: podman build -t jami-sdk -f Containerfile .
+#   Run from the jami-sdk repo root (where daemon/ submodule lives).
 
 # ── Stage 1: Build ──────────────────────────────────────────────────────
 FROM jami-sdk-base AS builder
@@ -13,9 +13,9 @@ FROM jami-sdk-base AS builder
 RUN dnf install -y nlohmann-json-devel && dnf clean all
 
 # Copy jami-sdk source
-COPY jami-sdk/src/ /build/jami-sdk/src/
-COPY jami-sdk/vendor/ /build/jami-sdk/vendor/
-COPY jami-sdk/CMakeLists.txt /build/jami-sdk/
+COPY src/ /build/jami-sdk/src/
+COPY vendor/ /build/jami-sdk/vendor/
+COPY CMakeLists.txt /build/jami-sdk/
 
 # Build jami-sdk against the pre-built libjami.so from the base image
 RUN cd /build/jami-sdk && \

@@ -2,7 +2,7 @@
 # Validates that the self-contained dist works without any special packages.
 #
 # Build: ./build.sh test-dist
-#   or:  podman build -t jami-sdk-test -f Containerfile.test <project-root>
+#   or:  podman build -t jami-sdk-test -f Containerfile.test .
 #
 # Requires: jami-sdk-base image already built
 
@@ -11,9 +11,9 @@ FROM jami-sdk-base AS builder
 
 RUN dnf install -y nlohmann-json-devel && dnf clean all
 
-COPY jami-sdk/src/ /build/jami-sdk/src/
-COPY jami-sdk/vendor/ /build/jami-sdk/vendor/
-COPY jami-sdk/CMakeLists.txt /build/jami-sdk/
+COPY src/ /build/jami-sdk/src/
+COPY vendor/ /build/jami-sdk/vendor/
+COPY CMakeLists.txt /build/jami-sdk/
 
 RUN cd /build/jami-sdk && \
     mkdir -p build && cd build && \
@@ -39,8 +39,7 @@ RUN dnf install -y \
     pcre2 expat \
     && dnf clean all
 
-COPY --from=builder /usr/local/lib64/libjami.so* /usr/local/lib64/
-COPY --from=builder /build/daemon/contrib/x86_64-redhat-linux/lib/ /usr/local/lib64/
+COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
 COPY --from=builder /build/jami-sdk/build/jami-sdk /usr/local/bin/jami-sdk
 
 RUN ldconfig && \
