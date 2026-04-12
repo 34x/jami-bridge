@@ -79,7 +79,8 @@ void StdioServer::send_notification(const std::string& method, const std::string
 void StdioServer::run() {
     running_ = true;
 
-    std::cerr << "[jami-sdk:stdio] Ready, reading JSON-RPC from stdin..." << std::endl;
+    // Notify the client that we're ready to process requests
+    send_notification("onReady", "{}");
 
     std::string line;
     while (running_ && std::getline(std::cin, line)) {
