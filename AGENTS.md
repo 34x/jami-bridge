@@ -69,11 +69,14 @@ All builds happen **inside podman containers** — never on the host.
 |---------|-------------|------|
 | `./build.sh base` | Build jami-sdk-base image (daemon from source) | ~20min, once |
 | `./build.sh dev` | Incremental build in dev container | <8s |
+| `./build.sh dev-run [args]` | Run dev binary in runtime container | — |
+| `./build.sh dev-dist` | Bundle binary + libs into `jami-sdk-dist-output/` | ~30s |
 | `./build.sh dev-shell` | Shell into running dev container | — |
-| `./build.sh dev-dist` | Create distribution tarball from dev build | ~30s |
 | `./build.sh dev-kill` | Stop dev container | — |
-| `./build.sh dev-clean` | Remove dev container | — |
-| `./build.sh sdk` | Production multi-stage build | ~5min |
+| `./build.sh dev-clean` | Remove dev container and build dir | — |
+| `./build.sh dist` | Production multi-stage build + dist image | ~5min |
+| `./build.sh test-dist` | Test production dist in fresh container | — |
+| `./build.sh sdk` | Production multi-stage build (no dist) | ~5min |
 
 ### Containerfiles
 
@@ -88,7 +91,14 @@ All builds happen **inside podman containers** — never on the host.
 1. `./build.sh base` — once, builds the 4GB base image
 2. `./build.sh dev` — starts persistent container `jami-sdk-dev` with source bind-mounted
 3. Edit code on host → `./build.sh dev` rebuilds incrementally (<8s)
-4. `./build.sh dev-dist` — creates self-contained tarball from dev build
+4. `./build.sh dev-dist` — bundles binary + libs into `jami-sdk-dist-output/` (no image rebuild)
+
+**Typical cycle:** `./build.sh dev && ./build.sh dev-dist`
+
+Output: `jami-sdk-dist-output/jami-sdk-dist/jami-sdk` — self-contained binary
+with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
+
+**For running in a container:** `./build.sh dev-run [--port 8091]`
 
 ### Container Images
 
@@ -136,22 +146,24 @@ All builds happen **inside podman containers** — never on the host.
 
 ## Self-Contained Distribution
 
-The `dev-dist` command creates a portable distribution:
+The `dev-dist` command bundles the dev binary + required shared libs:
 
 ```
 jami-sdk-dist/
 ├── jami-sdk          # Binary (3.6 MB), RPATH: $ORIGIN/lib
 └── lib/
-    ├── libjami.so    # 236 MB
-    ├── libpj*.so     # pjproject (6 libs)
-    ├── libopendht.so # DHT
-    └── libargon2.so  # Argon2
+    ├── libjami.so.16.0.0         237 MB  Jami daemon
+    ├── libgit2.so.1.9.2           1.3 MB  Git support
+    ├── libsecp256k1.so.5.0.0      1.3 MB  Crypto
+    └── libllhttp.so.9.3.1          80 KB  HTTP parser
 ```
 
 - Binary has `$ORIGIN/lib` RPATH — works without `LD_LIBRARY_PATH`
 - All bundled `.so` files also get `$ORIGIN` RPATH via `patchelf` (transitive deps)
-- Total: 241 MB extracted, ~92 MB compressed tarball
-- Only 3 libs not on Fedora 43 desktop — all bundled
+- Total: 243 MB extracted, ~92 MB compressed tarball
+- Output at: `jami-sdk-dist-output/jami-sdk-dist/`
+
+**To rebuild the dist:** `./build.sh dev && ./build.sh dev-dist`
 
 ## Configuration
 
@@ -189,9 +201,16 @@ CLI always wins → config file fills remaining defaults → built-in defaults l
 `--account` flag accepts:
 - Empty: auto-detect first account, or create new if none exist
 - Account ID (hex string): use specific account
-- `archive:///path/to/file.gz`: import from archive
-- `/path/to/file.gz`: shorthand for archive import
+- `archive:///path/to/file.gz`: import from archive (file must exist)
+- `/path/to/file.gz`: **create-or-reuse** — import if file exists, create new + export if not
 - `new`: create a new account
+
+The create-or-reuse pattern enables persistent bot accounts:
+```bash
+# First run: creates account + exports to /tmp/jami-bot.gz
+# Subsequent runs: imports the saved archive
+jami-sdk --account /tmp/jami-bot.gz
+```
 
 ## Key API Details
 

@@ -532,78 +532,71 @@ All compilation happens inside Podman containers — **nothing is built on the h
 ### Development workflow (recommended)
 
 The fastest way to iterate on the SDK. Source is mounted from the host,
-so only changed files are recompiled. The binary is tested in a lightweight
-runtime container — no image rebuild or dist packaging needed.
+so only changed files are recompiled. Uses the existing dev container
+with a mounted output directory — no image rebuilds, no `podman create/cp/rm`
+extraction dance.
+
+**One-time setup:**
 
 ```bash
-# One-time: build the base image (~10-20 min)
-./build.sh base
+./build.sh base    # Build the base image (~10-20 min)
+```
 
-# Compile the SDK (seconds on rebuild, ~30s first time)
+**Build + run cycle:**
+
+```bash
+# Rebuild the binary (incremental — only changed .cpp files recompile)
 ./build.sh dev
 
-# Run the dev binary in a fresh runtime container
-./build.sh dev-run
-
-# Run on a different port
-./build.sh dev-run --port 8091
-
-# Open a shell in the dev container (for调试, manual cmake, etc.)
-./build.sh dev-shell
-
-# Stop the dev container when done
-./build.sh dev-kill
+# Run the binary in a lightweight runtime container
+./build.sh dev-run [--port 8091]
 ```
 
-**How it works:**
-
-1. `dev` keeps a persistent container running with source bind-mounted
-2. Only changed `.cpp` files are recompiled (incremental make)
-3. `dev-run` copies the fresh binary + bundled libs into `dev-dist/`,
-   then mounts that directory into a minimal Fedora runtime container
-4. The bundled libs are copied once (240 MB) — subsequent runs only
-   copy the ~3.5 MB binary
-
-**Iterative cycle:** edit source → `./build.sh dev` → `./build.sh dev-run`
-
-### Production builds
-
-Full image builds — slower but produces the standalone distribution.
-
-### Build targets
+**Build + dist cycle (for testing the self-contained distribution):**
 
 ```bash
-cd jami-sdk
+# Rebuild → bundle into dist output (same container, no image rebuild)
+./build.sh dev && ./build.sh dev-dist
 
-# Build everything from scratch (base + SDK binary)
-./build.sh all          # base → check → sdk
+# Run the dist binary directly on the host
+./jami-sdk-dist-output/jami-sdk-dist/jami-sdk --help
+```
 
-# Build just the SDK binary (after base is built)
-./build.sh sdk
+This is the `dev` equivalent of `make clean && make build`:
+`dev` recompiles, `dev-dist` bundles the fresh binary + libs into
+`jami-sdk-dist-output/`.
 
-# Build the self-contained distribution tarball
+**All dev commands:**
+
+| Command | Description |
+|---------|-------------|
+| `./build.sh dev` | Compile SDK in dev container (incremental, <8s on rebuild) |
+| `./build.sh dev-run [args]` | Run dev binary in runtime container (port forwarding, signals) |
+| `./build.sh dev-dist` | Bundle binary + libs into `jami-sdk-dist-output/` |
+| `./build.sh dev-shell` | Shell into dev container |
+| `./build.sh dev-kill` | Stop dev container |
+| `./build.sh dev-clean` | Remove dev container and build dir |
+
+### CI / release builds
+
+Full image builds — for tagged releases or when you need the production
+distribution tarball via multi-stage build.
+
+```bash
+# Production SDK + dist image (multi-stage, ~5 min)
 ./build.sh dist
 
-# Build and test in a fresh Fedora container
+# Test the dist in a fresh Fedora container
 ./build.sh test-dist
-
-# Check libjami:: symbol visibility in the base image
-./build.sh check
-
-# Remove build artifacts
-./build.sh clean
 ```
 
-### Distribution tarball
+The `dist` target builds a `jami-sdk-dist` container image with the
+tarball at `/dist/jami-sdk-dist.tar.gz`. Extract it:
 
 ```bash
-./build.sh dist
-
-# Extract the tarball
 podman create --name extract jami-sdk-dist
 podman cp extract:/dist/jami-sdk-dist.tar.gz .
 podman rm extract
-
 tar xzf jami-sdk-dist.tar.gz
 ./jami-sdk-dist/jami-sdk --help
 ```
