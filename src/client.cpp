@@ -210,6 +210,14 @@ Client::Client(const Events& events, bool debug)
                     events_.on_messages_loaded(id, account_id, conv_id, messages);
                 }
             }),
+
+        // Name registration ended
+        libjami::exportable_callback<libjami::ConfigurationSignal::NameRegistrationEnded>(
+            [this](const std::string& account_id, int state, const std::string& name) {
+                if (events_.on_name_registration_ended) {
+                    events_.on_name_registration_ended(account_id, state, name);
+                }
+            }),
     });
 
     // Initialize the daemon

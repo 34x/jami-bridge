@@ -435,6 +435,20 @@ int main(int argc, char* argv[]) {
             };
             std::cout << notification.dump() << std::endl;
         };
+        events.on_name_registration_ended = [](const std::string& account_id,
+                                                 int state,
+                                                 const std::string& name) {
+            json notification;
+            notification["jsonrpc"] = "2.0";
+            notification["method"] = "onNameRegistrationEnded";
+            // state: 0=success, 1=invalid, 2=already taken, 3=error, 4=unsupported
+            notification["params"] = {
+                {"accountId", account_id},
+                {"state", state},
+                {"name", name},
+            };
+            std::cout << notification.dump() << std::endl;
+        };
         events.on_data_transfer_event = [](const jami::FileTransfer& transfer) {
             json notification;
             notification["jsonrpc"] = "2.0";

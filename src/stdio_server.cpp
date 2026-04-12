@@ -32,6 +32,7 @@
 ///   updateProfile     {accountId,displayName?,avatar?} — push display name/avatar to contacts
 ///   getAccountStatus  {accountId}    — volatile status
 ///   removeAccount    {accountId}     — remove account
+///   registerName     {accountId,name,password?} — register a public name
 ///   listConversations {accountId}    — list conversations
 ///   createConversation {accountId,title?} — create conversation
 ///   getConversation   {accountId,conversationId} — info + members
@@ -263,6 +264,14 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         std::string account_id = params.at("accountId");
         client_.remove_account(account_id);
         return make_result({{"removed", true}});
+    }
+
+    if (method == "registerName") {
+        std::string account_id = params.at("accountId");
+        std::string name = params.at("name");
+        std::string password = params.value("password", "");
+        bool ok = client_.register_name(account_id, password, name);
+        return make_result({{"registered", ok}, {"accountId", account_id}, {"name", name}});
     }
 
     // ── Conversations ────────────────────────────────────────────────

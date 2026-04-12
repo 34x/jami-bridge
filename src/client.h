@@ -100,6 +100,8 @@ struct Events {
                        const std::string& peer,
                        const std::string& message_id,
                        int state)> on_message_status_changed;
+    /// Called when a name registration completes.
+    std::function<void(const std::string& account_id, int state, const std::string& name)> on_name_registration_ended;
     /// Called when messages have been loaded (response to load_messages).
     std::function<void(uint32_t req_id,
                        const std::string& account_id,
