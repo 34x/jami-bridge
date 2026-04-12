@@ -4,6 +4,8 @@
 
 > **Not affiliated with** [Savoir-faire Linux](https://www.savoirfairelinux.com/) or the
 > Jami project. Jami is a trademark of Savoir-faire Linux Inc.
+>
+> Built with [pi.dev](https://pi.dev) and **GLM-5.1**.
 
 Runs the Jami daemon in-process (`libjami.so`, library mode — same approach as
 Android/iOS/Windows clients, no DBus required) and exposes it through three interfaces:
