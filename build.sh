@@ -84,11 +84,24 @@ build_dist() {
     echo "=== Distribution image built: jami-sdk-dist ==="
     echo ""
     echo "To extract the tarball:"
-    echo "  podman create --name dist-extract jami-sdk-dist"
-    echo "  podman cp dist-extract:/dist/jami-sdk-dist.tar.gz ."
-    echo "  podman rm dist-extract"
-    echo "  tar xzf jami-sdk-dist.tar.gz"
-    echo "  ./jami-sdk-dist/jami-sdk --help"
+    echo "  ./build.sh dist-extract"
+}
+
+extract_dist() {
+    local OUTPUT_DIR="$SCRIPT_DIR/jami-sdk-dist-output"
+    echo "=== Extracting dist tarball from jami-sdk-dist image ==="
+    podman rm -f dist-extract 2>/dev/null
+    podman create --name dist-extract jami-sdk-dist
+    podman cp dist-extract:/dist/jami-sdk-dist.tar.gz "$SCRIPT_DIR/"
+    podman rm dist-extract
+    mkdir -p "$OUTPUT_DIR"
+    tar xzf "$SCRIPT_DIR/jami-sdk-dist.tar.gz" -C "$OUTPUT_DIR"
+    rm "$SCRIPT_DIR/jami-sdk-dist.tar.gz"
+    echo "=== Extracted to $OUTPUT_DIR/jami-sdk-dist/ ==="
+    ls -lh "$OUTPUT_DIR/jami-sdk-dist/jami-sdk"
+    echo ""
+    echo "To run:"
+    echo "  $OUTPUT_DIR/jami-sdk-dist/jami-sdk --help"
 }
 
 test_dist() {
@@ -393,6 +406,9 @@ case "${1:-help}" in
         build_sdk
         build_dist
         ;;
+    dist-extract)
+        extract_dist
+        ;;
     test-dist)
         build_sdk
         test_dist
@@ -441,6 +457,7 @@ case "${1:-help}" in
         echo "  check         Check libjami:: symbols in base image"
         echo "  sdk           Build SDK production image"
         echo "  dist          Build SDK + create self-contained dist tarball"
+        echo "  dist-extract  Extract dist tarball from image to jami-sdk-dist-output/"
         echo "  test-dist     Test dist in a fresh Fedora container"
         echo "  all           base → sdk"
         echo ""
