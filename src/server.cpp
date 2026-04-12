@@ -502,6 +502,77 @@ void Server::setup_routes(httplib::Server* svr) {
         json_ok(res, json{{"account_id", account_id}, {"contacts", arr}});
     });
 
+    // ── File Transfers ──────────────────────────────────────────────────
+
+    // Send file to a conversation
+    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files)", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string account_id = req.matches[1];
+        std::string conv_id = req.matches[2];
+        try {
+            auto body = json::parse(req.body);
+            auto path = body.at("path").get<std::string>();
+            auto display_name = body.value("displayName", "");
+            auto reply_to = body.value("replyTo", "");
+            client_.send_file(account_id, conv_id, path, display_name, reply_to);
+            json_ok(res, json{{"sent", true}, {"conversation_id", conv_id}, {"path", path}});
+        } catch (const std::exception& e) {
+            json_error(res, 400, std::string("Invalid request: ") + e.what());
+        }
+    });
+
+    // Download file from a conversation
+    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/download)", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string account_id = req.matches[1];
+        std::string conv_id = req.matches[2];
+        try {
+            auto body = json::parse(req.body);
+            auto interaction_id = body.at("interactionId").get<std::string>();
+            auto file_id = body.at("fileId").get<std::string>();
+            auto download_path = body.at("path").get<std::string>();
+            bool ok = client_.download_file(account_id, conv_id, interaction_id, file_id, download_path);
+            json_ok(res, json{{"downloading", ok}, {"conversation_id", conv_id}, {"path", download_path}});
+        } catch (const std::exception& e) {
+            json_error(res, 400, std::string("Invalid request: ") + e.what());
+        }
+    });
+
+    // Cancel file transfer
+    svr->Post(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/cancel)", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string account_id = req.matches[1];
+        std::string conv_id = req.matches[2];
+        try {
+            auto body = json::parse(req.body);
+            auto file_id = body.at("fileId").get<std::string>();
+            auto err = client_.cancel_data_transfer(account_id, conv_id, file_id);
+            json_ok(res, json{{"cancelled", err == libjami::DataTransferError::success},
+                               {"error_code", static_cast<int>(err)}});
+        } catch (const std::exception& e) {
+            json_error(res, 400, std::string("Invalid request: ") + e.what());
+        }
+    });
+
+    // Get file transfer info
+    svr->Get(R"(/api/accounts/([^/]+)/conversations/([^/]+)/files/([^/]+))", [this](const httplib::Request& req, httplib::Response& res) {
+        std::string account_id = req.matches[1];
+        std::string conv_id = req.matches[2];
+        std::string file_id = req.matches[3];
+        jami::FileTransfer info;
+        bool found = client_.file_transfer_info(account_id, conv_id, file_id, info);
+        if (!found) {
+            json_error(res, 404, "Transfer not found: " + file_id);
+            return;
+        }
+        json_ok(res, json{
+            {"account_id", account_id},
+            {"conversation_id", conv_id},
+            {"file_id", file_id},
+            {"path", info.path},
+            {"total_size", info.total_size},
+            {"bytes_progress", info.bytes_progress},
+            {"event_code", info.event_code},
+        });
+    });
+
     // Set account enabled/disabled
     svr->Post(R"(/api/accounts/([^/]+)/enabled)", [this](const httplib::Request& req, httplib::Response& res) {
         std::string account_id = req.matches[1];

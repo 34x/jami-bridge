@@ -86,6 +86,37 @@ Client::Client(const Events& events, bool debug)
                 }
             }),
 
+        // File transfer event (upload, download, progress)
+        libjami::exportable_callback<libjami::DataTransferSignal::DataTransferEvent>(
+            [this](const std::string& account_id,
+                   const std::string& conversation_id,
+                   const std::string& interaction_id,
+                   const std::string& file_id,
+                   int event_code) {
+                if (events_.on_data_transfer_event) {
+                    FileTransfer transfer;
+                    transfer.account_id = account_id;
+                    transfer.conversation_id = conversation_id;
+                    transfer.interaction_id = interaction_id;
+                    transfer.file_id = file_id;
+                    transfer.event_code = event_code;
+
+                    // Try to get more details from fileTransferInfo
+                    std::string path;
+                    int64_t total = 0, progress = 0;
+                    auto err = libjami::fileTransferInfo(
+                        account_id, conversation_id, file_id,
+                        path, total, progress);
+                    if (err == libjami::DataTransferError::success) {
+                        transfer.path = path;
+                        transfer.total_size = total;
+                        transfer.bytes_progress = progress;
+                    }
+
+                    events_.on_data_transfer_event(transfer);
+                }
+            }),
+
         // Conversation member event (add/join/leave/ban)
         libjami::exportable_callback<libjami::ConversationSignal::ConversationMemberEvent>(
             [this](const std::string& account_id,
@@ -418,6 +449,46 @@ void Client::remove_contact(const std::string& account_id, const std::string& ur
 
 std::vector<std::map<std::string, std::string>> Client::list_contacts(const std::string& account_id) const {
     return libjami::getContacts(account_id);
+}
+
+// ── File Transfers ─────────────────────────────────────────────────────
+
+void Client::send_file(const std::string& account_id,
+                        const std::string& conv_id,
+                        const std::string& path,
+                        const std::string& display_name,
+                        const std::string& reply_to) {
+    libjami::sendFile(account_id, conv_id, path, display_name, reply_to);
+}
+
+bool Client::download_file(const std::string& account_id,
+                            const std::string& conv_id,
+                            const std::string& interaction_id,
+                            const std::string& file_id,
+                            const std::string& download_path) {
+    return libjami::downloadFile(account_id, conv_id, interaction_id, file_id, download_path);
+}
+
+libjami::DataTransferError Client::cancel_data_transfer(const std::string& account_id,
+                                                          const std::string& conv_id,
+                                                          const std::string& file_id) {
+    return libjami::cancelDataTransfer(account_id, conv_id, file_id);
+}
+
+bool Client::file_transfer_info(const std::string& account_id,
+                                 const std::string& conv_id,
+                                 const std::string& file_id,
+                                 FileTransfer& info) {
+    std::string path;
+    int64_t total = 0, progress = 0;
+    auto err = libjami::fileTransferInfo(account_id, conv_id, file_id, path, total, progress);
+    if (err != libjami::DataTransferError::success) {
+        return false;
+    }
+    info.path = path;
+    info.total_size = total;
+    info.bytes_progress = progress;
+    return true;
 }
 
 // ── Name Service ─────────────────────────────────────────────────────────

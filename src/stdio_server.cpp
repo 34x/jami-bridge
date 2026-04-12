@@ -26,10 +26,17 @@
 ///   addContact       {accountId,uri} — add contact
 ///   removeContact    {accountId,uri} — remove contact
 ///
+///   ── File Transfers ──────────────────────────────────────────────
+///   sendFile         {accountId,conversationId,path,displayName?,replyTo?} — send file
+///   downloadFile     {accountId,conversationId,interactionId,fileId,path} — download file
+///   cancelTransfer   {accountId,conversationId,fileId} — cancel transfer
+///   transferInfo     {accountId,conversationId,fileId} — get transfer info
+///
 /// Events (pushed as notifications):
-///   onMessageReceived   {accountId,conversationId,from,body,id,type,timestamp}
+///   onMessageReceived   {accountId,conversationId,from,body,id,type,timestamp,parentId}
 ///   onRegistrationChanged {accountId,state,code,detail}
 ///   onConversationRequestReceived {accountId,conversationId}
+///   onDataTransferEvent {accountId,conversationId,interactionId,fileId,eventCode,path?,totalSize?,bytesProgress?}
 
 #include "stdio_server.h"
 
@@ -435,6 +442,57 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         std::string from_uri = params.at("from");
         bool ok = client_.decline_trust_request(account_id, from_uri);
         return make_result({{"declined", ok}, {"from", from_uri}});
+    }
+
+    // ── File Transfers ──────────────────────────────────────────────
+
+    if (method == "sendFile") {
+        std::string account_id = params.at("accountId");
+        std::string conv_id = params.at("conversationId");
+        std::string path = params.at("path");
+        std::string display_name = params.value("displayName", "");
+        std::string reply_to = params.value("replyTo", "");
+        client_.send_file(account_id, conv_id, path, display_name, reply_to);
+        return make_result({{"sent", true}, {"conversationId", conv_id}, {"path", path}});
+    }
+
+    if (method == "downloadFile") {
+        std::string account_id = params.at("accountId");
+        std::string conv_id = params.at("conversationId");
+        std::string interaction_id = params.at("interactionId");
+        std::string file_id = params.at("fileId");
+        std::string download_path = params.at("path");
+        bool ok = client_.download_file(account_id, conv_id, interaction_id, file_id, download_path);
+        return make_result({{"downloading", ok}, {"conversationId", conv_id}, {"path", download_path}});
+    }
+
+    if (method == "cancelTransfer") {
+        std::string account_id = params.at("accountId");
+        std::string conv_id = params.at("conversationId");
+        std::string file_id = params.at("fileId");
+        auto err = client_.cancel_data_transfer(account_id, conv_id, file_id);
+        return make_result({{"cancelled", err == libjami::DataTransferError::success},
+                           {"errorCode", static_cast<int>(err)}});
+    }
+
+    if (method == "transferInfo") {
+        std::string account_id = params.at("accountId");
+        std::string conv_id = params.at("conversationId");
+        std::string file_id = params.at("fileId");
+        jami::FileTransfer info;
+        bool found = client_.file_transfer_info(account_id, conv_id, file_id, info);
+        if (!found) {
+            return make_error(-32603, "Transfer not found: " + file_id);
+        }
+        return make_result({
+            {"accountId", account_id},
+            {"conversationId", conv_id},
+            {"fileId", file_id},
+            {"path", info.path},
+            {"totalSize", info.total_size},
+            {"bytesProgress", info.bytes_progress},
+            {"eventCode", info.event_code}
+        });
     }
 
     // ── Unknown method ───────────────────────────────────────────────

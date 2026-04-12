@@ -325,6 +325,7 @@ int main(int argc, char* argv[]) {
                 {"id", msg.id},
                 {"type", msg.type},
                 {"timestamp", msg.timestamp},
+                {"parentId", msg.parent_id},
             };
             std::cout << notification.dump() << std::endl;
         };
@@ -400,6 +401,25 @@ int main(int argc, char* argv[]) {
             };
             std::cout << notification.dump() << std::endl;
         };
+        events.on_data_transfer_event = [](const jami::FileTransfer& transfer) {
+            json notification;
+            notification["jsonrpc"] = "2.0";
+            notification["method"] = "onDataTransferEvent";
+            notification["params"] = {
+                {"accountId", transfer.account_id},
+                {"conversationId", transfer.conversation_id},
+                {"interactionId", transfer.interaction_id},
+                {"fileId", transfer.file_id},
+                {"eventCode", transfer.event_code},
+            };
+            if (!transfer.path.empty())
+                notification["params"]["path"] = transfer.path;
+            if (transfer.total_size > 0)
+                notification["params"]["totalSize"] = transfer.total_size;
+            if (transfer.bytes_progress > 0)
+                notification["params"]["bytesProgress"] = transfer.bytes_progress;
+            std::cout << notification.dump() << std::endl;
+        };
     } else if (cfg.mode == jami::Config::Mode::CLI) {
         // CLI mode: suppress event output, just print command result
     } else {
@@ -451,6 +471,14 @@ int main(int argc, char* argv[]) {
                                                 const std::string& conv_id) {
             std::cerr << "[jami-sdk] Trust request: from=" << from_uri
                       << " conv=" << conv_id << std::endl;
+        };
+        events.on_data_transfer_event = [](const jami::FileTransfer& transfer) {
+            std::cerr << "[jami-sdk] Data transfer: "
+                      << "conv=" << transfer.conversation_id << " "
+                      << "file=" << transfer.file_id << " "
+                      << "event=" << transfer.event_code << " "
+                      << "progress=" << transfer.bytes_progress << "/" << transfer.total_size
+                      << std::endl;
         };
     }
 

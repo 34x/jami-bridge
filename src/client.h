@@ -50,6 +50,20 @@ struct Message {
     std::string type;       ///< "text", "file", etc.
 };
 
+/// Information about a file transfer.
+struct FileTransfer {
+    std::string account_id;
+    std::string conversation_id;
+    std::string interaction_id;  ///< The message/interaction ID of the file message
+    std::string file_id;         ///< The file transfer ID
+    std::string display_name;    ///< Human-readable file name
+    std::string path;            ///< Local file path (for outgoing: source, for incoming: destination)
+    std::string mimetype;        ///< MIME type
+    int64_t total_size = 0;      ///< Total file size in bytes
+    int64_t bytes_progress = 0;  ///< Bytes transferred so far
+    int event_code = 0;          ///< DataTransferEventCode
+};
+
 /// Callbacks for asynchronous events from the daemon.
 struct Events {
     std::function<void(const Message&)> on_message_received;
@@ -73,6 +87,9 @@ struct Events {
                        const std::string& account_id,
                        const std::string& conv_id,
                        const std::vector<libjami::SwarmMessage>& messages)> on_messages_loaded;
+
+    /// Called when a file transfer event occurs.
+    std::function<void(const FileTransfer& transfer)> on_data_transfer_event;
 };
 
 /// Minimal Jami client — messaging and conversations only.
@@ -263,6 +280,40 @@ public:
 
     /// Get const reference to stats.
     const Stats& stats() const { return stats_; }
+
+    // ── File Transfers ──────────────────────────────────────────────
+
+    /// Send a file to a conversation.
+    /// The file at `path` must exist on disk.
+    /// `display_name` is the name shown to the recipient (can be empty to use path basename).
+    /// `reply_to` is an optional message ID to reply to.
+    void send_file(const std::string& account_id,
+                   const std::string& conv_id,
+                   const std::string& path,
+                   const std::string& display_name = "",
+                   const std::string& reply_to = "");
+
+    /// Download a file from a conversation to a local path.
+    /// `interaction_id` is the message ID of the file message.
+    /// `file_id` is the file transfer identifier within that message.
+    /// `download_path` is where to save the file on disk.
+    bool download_file(const std::string& account_id,
+                       const std::string& conv_id,
+                       const std::string& interaction_id,
+                       const std::string& file_id,
+                       const std::string& download_path);
+
+    /// Cancel an ongoing file transfer.
+    libjami::DataTransferError cancel_data_transfer(const std::string& account_id,
+                                                    const std::string& conv_id,
+                                                    const std::string& file_id);
+
+    /// Get info about an ongoing or completed file transfer.
+    /// Returns true if the transfer was found and info was filled in.
+    bool file_transfer_info(const std::string& account_id,
+                            const std::string& conv_id,
+                            const std::string& file_id,
+                            FileTransfer& info);
 
     // ── Name Service ─────────────────────────────────────────────────
 

@@ -127,6 +127,7 @@ with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
 - `libjami::sendTrustRequest()`, `libjami::acceptTrustRequest()`, `libjami::discardTrustRequest()`
 - `libjami::getConversations()`, `libjami::getConversationRequests()`
 - `libjami::loadConversationMessages()` — async, needs condition_variable wait for sync
+- `libjami::sendFile()`, `libjami::downloadFile()`, `libjami::cancelDataTransfer()`, `libjami::fileTransferInfo()`
 
 ### Key Signal Names
 
@@ -137,6 +138,7 @@ with RPATH `$ORIGIN/lib`, works on host directly (Fedora 43+).
 | `ConversationRequestReceived` | — | Group/conversation invite |
 | `IncomingTrustRequest` | — | Contact request |
 | `registrationStateChanged` | — | Account registration status |
+| `DataTransferEvent` | — | File transfer progress/status |
 
 ### SwarmMessage Body Key
 
@@ -234,6 +236,10 @@ jami-sdk --account /tmp/jami-bot.gz
 | `/api/requests` | GET | Pending conversation requests |
 | `/api/requests/:id/accept` | POST | Accept request |
 | `/api/requests/:id/decline` | POST | Decline request |
+| `/api/accounts/:id/conversations/:conv/files` | POST | Send file {path, displayName?, replyTo?} |
+| `/api/accounts/:id/conversations/:conv/files/download` | POST | Download file {interactionId, fileId, path} |
+| `/api/accounts/:id/conversations/:conv/files/cancel` | POST | Cancel transfer {fileId} |
+| `/api/accounts/:id/conversations/:conv/files/:fileId` | GET | Get transfer info |
 | `/api/openapi.json` | GET | OpenAPI 3.0.3 spec |
 | `/` | GET | Interactive HTML docs |
 
