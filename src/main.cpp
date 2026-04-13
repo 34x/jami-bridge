@@ -571,7 +571,7 @@ int main(int argc, char* argv[]) {
     } else {
         // HTTP mode: log events to stderr
         events.on_message_received = [](const jami::Message& msg) {
-            jami::log("Message received: ", "from=", msg.from, " ", "conv=", msg.conversation_id, " ", "body=\"", msg.body, "\"");
+            jami::log("Message received: ", "from=", msg.from, " conv=", msg.conversation_id);
         };
         events.on_registration_changed = [](const std::string& account_id,
                                             const std::string& state,
