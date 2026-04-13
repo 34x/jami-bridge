@@ -135,12 +135,19 @@ echo '{"jsonrpc":"2.0","method":"sendMessage","params":{"accountId":"...","conve
 | Method | Key params | Returns |
 |--------|-----------|---------|
 | `ping` | — | `{status, version}` |
+| `version` | — | `{version}` |
+| `stats` | — | `{invites_accepted, invites_declined, ...}` |
 | `shutdown` | — | `{status}` |
 | `listAccounts` | — | `{accounts: [id]}` |
 | `createAccount` | `alias?, password?` | `{accountId}` |
+| `importAccount` | `path, password?` | `{accountId}` |
+| `exportAccount` | `accountId, path, password?` | `{exported}` |
 | `getAccountDetails` | `accountId` | `{details}` |
 | `getAccountStatus` | `accountId` | `{status}` |
+| `setAccountDetails` | `accountId, details` | `{updated}` |
+| `updateProfile` | `accountId, displayName?` | `{updated}` |
 | `removeAccount` | `accountId` | `{removed}` |
+| `registerName` | `accountId, name` | `{registered}` (async: see `onNameRegistrationEnded`) |
 | `listConversations` | `accountId` | `{conversations: [{id, mode, title, members}]}` |
 | `createConversation` | `accountId, title?` | `{conversationId, title}` |
 | `getConversation` | `accountId, conversationId` | `{mode, title, memberCount, members}` |
@@ -149,22 +156,36 @@ echo '{"jsonrpc":"2.0","method":"sendMessage","params":{"accountId":"...","conve
 | `removeMember` | `accountId, conversationId, uri` | `{removed}` |
 | `updateConversation` | `accountId, conversationId, info` | `{updated}` |
 | `sendMessage` | `accountId, conversationId, body, parentId?` | `{sent, conversationId}` |
+| `editMessage` | `accountId, conversationId, messageId, body` | `{edited}` |
 | `loadMessages` | `accountId, conversationId, count?, from?` | `{messages: [...]}` |
 | `listRequests` | `accountId` | `{requests}` |
 | `acceptRequest` | `accountId, conversationId` | `{accepted}` |
 | `declineRequest` | `accountId, conversationId` | `{declined}` |
 | `addContact` | `accountId, uri` | `{added}` |
 | `removeContact` | `accountId, uri` | `{removed}` |
+| `listContacts` | `accountId` | `{contacts}` |
 | `sendTrustRequest` | `accountId, uri` | `{sent}` |
 | `listTrustRequests` | `accountId` | `{requests}` |
+| `acceptTrustRequest` | `accountId, from` | `{accepted}` |
+| `declineTrustRequest` | `accountId, from` | `{declined}` |
+| `sendFile` | `accountId, conversationId, path, displayName?, replyTo?` | `{sent}` |
+| `downloadFile` | `accountId, conversationId, interactionId, fileId, path` | `{downloading}` |
+| `cancelTransfer` | `accountId, conversationId, fileId` | `{cancelled}` |
+| `transferInfo` | `accountId, conversationId, fileId` | `{path, totalSize, bytesProgress, eventCode}` |
 
 **Event notifications** (pushed by bridge):
 
 | Method | When |
-|--------|------|
+|--------|-------|
+| `onReady` | Bridge is ready to accept commands |
 | `onMessageReceived` | New message in a conversation |
 | `onRegistrationChanged` | Account registration status changed |
 | `onConversationRequestReceived` | New conversation invite received |
+| `onConversationReady` | Conversation finished loading |
+| `onConversationMemberEvent` | Member added/removed from conversation |
+| `onMessageStatusChanged` | Message delivery status changed |
+| `onTrustRequestReceived` | Incoming contact/trust request |
+| `onNameRegistrationEnded` | Name registration result (async) |
 
 Shutdown: send `EOF` on stdin, or call the `shutdown` method.
 
@@ -474,10 +495,10 @@ podman run -d \
 
 ---
 
-## Python Bot Example
+## Python Bot
 
-The `examples/pi-bot/` directory contains a complete chat bot that bridges
-Jami conversations to the [pi](https://github.com/nicoschmdt/pi) AI coding agent.
+The [jami-pi](https://github.com/34x/jami-pi) project provides a complete
+chat bot that bridges Jami conversations to the [pi](https://pi.dev) AI agent.
 
 ### How it works
 
@@ -491,43 +512,21 @@ JSON-RPC. **No HTTP server, no polling** — events are pushed in real-time.
 ### Quick start
 
 ```bash
-cd examples/pi-bot
-
-# Auto-detect account and conversation
-python3 bot.py --jami /path/to/jami-bridge
-
-# Specify conversation
-python3 bot.py --jami /path/to/jami-bridge --conversation CONV_ID
-
-# Dry-run (don't call pi, just log)
-python3 bot.py --jami /path/to/jami-bridge --dry-run
+python3 bot.py --jami /path/to/jami-bridge --bridge-args '--auto-accept'
 ```
 
-### Bot options
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--jami PATH` | `jami-bridge` | Path to jami-bridge binary |
-| `--account ID` | auto-detect | Jami account ID |
-| `--conversation ID` | auto-detect | Conversation to monitor |
-| `--history N` | `20` | Recent messages to include as context |
-| `--session-dir DIR` | `/tmp/jami-bot-sessions` | pi session files directory |
-| `--system-prompt TEXT` | (built-in) | System prompt for pi |
-| `--no-session` | off | Disable pi sessions (stateless) |
-| `--no-ack` | off | Don't send acknowledgment messages |
-| `--pi-args ARGS` | (none) | Extra arguments passed to pi CLI |
-| `--dry-run` | off | Log messages without calling pi |
+See [jami-pi](https://github.com/34x/jami-pi) for full documentation.
 
 ### Bot features
 
 - **Real-time events** via STDIO JSON-RPC (no polling, no HTTP)
 - **Per-conversation pi sessions** — persistent context with autocompact
-- **Acknowledgment messages** — "💭 received, thinking..." (filtered from pi context)
+- **Multi-account support** — serve multiple Jami accounts from one bot
+- **Acknowledgment messages** — live progress updates (filtered from pi context)
 - **Silence mode** — pi can choose not to respond in group chats (`__SILENT__`)
 - **Sender-aware formatting** — shows who said what
 - **Conversation history** — injects recent messages on first session
-
-See [examples/pi-bot/README.md](examples/pi-bot/README.md) for full details.
+- **Privacy** — no message content in logs, only conversation IDs
 
 ---
 
