@@ -29,14 +29,23 @@
 
 namespace jami {
 
-/// Log a message to stderr with HH:MM:SS timestamp and [jami-bridge] prefix.
+/// Returns current time as "HH:MM:SS.mmm" (milliseconds).
+inline std::string ts() {
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  now.time_since_epoch()) % 1000;
+    std::ostringstream oss;
+    oss << std::put_time(std::localtime(&time), "%H:%M:%S")
+        << '.' << std::setfill('0') << std::setw(3) << ms.count();
+    return oss.str();
+}
+
+/// Log a message to stderr with timestamp and [jami-bridge] prefix.
 /// Usage: jami::log("something happened: ", value);
 template <typename... Args>
 void log(Args&&... args) {
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::cerr << std::put_time(std::localtime(&time), "%H:%M:%S")
-              << " [jami-bridge] ";
+    std::cerr << ts() << " [jami-bridge] ";
     (std::cerr << ... << args) << std::endl;
 }
 
@@ -44,10 +53,7 @@ void log(Args&&... args) {
 /// Usage: jami::log_tag("hook", "timed out after ", 30, "s");
 template <typename... Args>
 void log_tag(const std::string& tag, Args&&... args) {
-    auto now = std::chrono::system_clock::now();
-    auto time = std::chrono::system_clock::to_time_t(now);
-    std::cerr << std::put_time(std::localtime(&time), "%H:%M:%S")
-              << " [jami-bridge:" << tag << "] ";
+    std::cerr << ts() << " [jami-bridge:" << tag << "] ";
     (std::cerr << ... << args) << std::endl;
 }
 
