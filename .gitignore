@@ -21,4 +21,6 @@ jami-bridge-dist/
 cmake-build-*/
 
 # Daemon submodule (managed by git)
-# daemon/ is tracked via submodule, not ignoredjami-sdk-dist-output/
+# daemon/ is tracked via submodule, not ignored
+
+jami-sdk-dist-output/
