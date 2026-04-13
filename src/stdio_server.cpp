@@ -61,6 +61,8 @@
 ///   onConversationRequestReceived {accountId,conversationId}
 ///   onDataTransferEvent {accountId,conversationId,interactionId,fileId,eventCode,path?,totalSize?,bytesProgress?}
 
+
+#include "log.h"
 #include "stdio_server.h"
 
 #include <nlohmann/json.hpp>
@@ -124,7 +126,7 @@ void StdioServer::run() {
     }
 
     running_ = false;
-    std::cerr << "[jami-bridge:stdio] Stdin closed, exiting." << std::endl;
+    jami::log_tag("stdio", "Stdin closed, exiting.");
 }
 
 std::string StdioServer::handle_request(const std::string& json_line) {

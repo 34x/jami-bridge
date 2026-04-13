@@ -26,6 +26,8 @@
 /// Signal handlers are registered via libjami::registerSignalHandlers()
 /// with libjami::exportable_callback<libjami::SignalType>.
 
+
+#include "log.h"
 #include "client.h"
 
 #include <iostream>
@@ -234,14 +236,14 @@ Client::Client(const Events& events, bool debug)
     }
 
     running_ = true;
-    std::cerr << "[jami-bridge] Daemon initialized and running" << std::endl;
+    jami::log("Daemon initialized and running");
 }
 
 Client::~Client() {
     if (running_) {
         libjami::fini();
         running_ = false;
-        std::cerr << "[jami-bridge] Daemon shut down" << std::endl;
+        jami::log("Daemon shut down");
     }
 }
 

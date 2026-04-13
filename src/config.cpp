@@ -19,6 +19,8 @@
 /// @file config.cpp
 /// @brief Configuration loading and validation for jami-bridge.
 
+
+#include "log.h"
 #include "config.h"
 
 #include <nlohmann/json.hpp>
@@ -186,7 +188,7 @@ int Config::parse_args(int argc, char* argv[]) {
             print_usage(argv[0]);
             return -1;  // caller should exit(0)
         } else {
-            std::cerr << "Unknown option: " << arg << std::endl;
+            jami::log("Unknown option: ", arg);
             print_usage(argv[0]);
             return 1;
         }
@@ -229,7 +231,7 @@ int Config::load_config_file() {
 
     std::ifstream f(config_file);
     if (!f.is_open()) {
-        std::cerr << "Error: Cannot open config file: " << config_file << std::endl;
+        jami::log("Error: Cannot open config file: ", config_file);
         return 1;
     }
 
@@ -237,7 +239,7 @@ int Config::load_config_file() {
     try {
         cfg = json::parse(f);
     } catch (const json::parse_error& e) {
-        std::cerr << "Error: Invalid JSON in config file: " << e.what() << std::endl;
+        jami::log("Error: Invalid JSON in config file: ", e.what());
         return 1;
     }
 
@@ -343,50 +345,47 @@ void Config::apply_daemon_paths() const {
 
     if (!data_dir.empty()) {
         setenv("XDG_DATA_HOME", data_dir.c_str(), 1);
-        std::cerr << "[jami-bridge] Data dir: " << data_dir << std::endl;
+        jami::log("Data dir: ", data_dir);
     }
     if (!config_dir.empty()) {
         setenv("XDG_CONFIG_HOME", config_dir.c_str(), 1);
-        std::cerr << "[jami-bridge] Config dir: " << config_dir << std::endl;
+        jami::log("Config dir: ", config_dir);
     }
     if (!cache_dir.empty()) {
         setenv("XDG_CACHE_HOME", cache_dir.c_str(), 1);
-        std::cerr << "[jami-bridge] Cache dir: " << cache_dir << std::endl;
+        jami::log("Cache dir: ", cache_dir);
     }
 }
 
 int Config::validate() const {
     // STDIO + hook incompatible (both use stdout)
     if (mode == Mode::STDIO && !hook_command.empty()) {
-        std::cerr << "Error: --stdio and --hook are incompatible (both use stdout)" << std::endl;
+        jami::log("Error: --stdio and --hook are incompatible (both use stdout)");
         return 1;
     }
 
     // CLI + hook incompatible
     if (mode == Mode::CLI && !hook_command.empty()) {
-        std::cerr << "Error: --hook cannot be used with CLI commands (one-shot mode)" << std::endl;
+        jami::log("Error: --hook cannot be used with CLI commands (one-shot mode)");
         return 1;
     }
 
     // auto-accept-from requires an owner URI
     if (auto_accept == 1 && auto_accept_from.empty()) {
-        std::cerr << "Error: --auto-accept-from requires a Jami URI" << std::endl;
+        jami::log("Error: --auto-accept-from requires a Jami URI");
         return 1;
     }
 
     // --auto-accept and --auto-accept-from conflict
     if (auto_accept_all_explicit && !auto_accept_from.empty()) {
-        std::cerr << "Warning: --auto-accept and --auto-accept-from both set; "
-                  << "--auto-accept takes precedence (accept all)" << std::endl;
+        jami::log("Warning: --auto-accept and --auto-accept-from both set; --auto-accept takes precedence (accept all)");
     }
     // --reject-unknown with accept flags
     if (auto_accept == 2 && auto_accept_all_explicit) {
-        std::cerr << "Warning: --reject-unknown and --auto-accept both set; "
-                  << "--auto-accept takes precedence" << std::endl;
+        jami::log("Warning: --reject-unknown and --auto-accept both set; --auto-accept takes precedence");
     }
     if (auto_accept == 2 && !auto_accept_from.empty()) {
-        std::cerr << "Warning: --reject-unknown and --auto-accept-from both set; "
-                  << "--auto-accept-from takes precedence" << std::endl;
+        jami::log("Warning: --reject-unknown and --auto-accept-from both set; --auto-accept-from takes precedence");
     }
 
     // CLI commands that require --account
@@ -396,11 +395,11 @@ int Config::validate() const {
                 // Will try auto-detect later, not an error here
             }
             if (conversation_id.empty()) {
-                std::cerr << "Error: --conversation required for --send-message" << std::endl;
+                jami::log("Error: --conversation required for --send-message");
                 return 1;
             }
             if (body.empty()) {
-                std::cerr << "Error: --body required for --send-message" << std::endl;
+                jami::log("Error: --body required for --send-message");
                 return 1;
             }
         }
@@ -408,7 +407,7 @@ int Config::validate() const {
             // Will try auto-detect, not an error here
         }
         if (cli_command == "load-messages" && (conversation_id.empty())) {
-            std::cerr << "Error: --conversation required for --load-messages" << std::endl;
+            jami::log("Error: --conversation required for --load-messages");
             return 1;
         }
     }
@@ -420,7 +419,7 @@ int Config::validate() const {
             std::string path = account.substr(10);
             std::ifstream test(path);
             if (!test.is_open()) {
-                std::cerr << "Error: Account archive not found: " << path << std::endl;
+                jami::log("Error: Account archive not found: ", path);
                 return 1;
             }
         }
