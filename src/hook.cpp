@@ -233,8 +233,10 @@ HookResult run_hook_command(const std::string& command,
 // ── HookManager ──────────────────────────────────────────────────────────
 
 HookManager::HookManager(Client& client, const std::string& command,
-                         const std::string& events, int timeout)
+                         const std::string& events, int timeout,
+                         int max_concurrent)
     : client_(client), command_(command), timeout_(timeout)
+    , max_concurrent_(max_concurrent), active_hooks_(0)
 {
     // Parse comma-separated event types
     std::string remaining = events;
@@ -273,13 +275,13 @@ void HookManager::install_callbacks(Events& events) {
             if (orig_cb) orig_cb(msg);
 
             json event_json;
-            event_json["type"] = "onMessageReceived";
+            event_json["eventType"] = "onMessageReceived";
             event_json["accountId"] = msg.account_id;
             event_json["conversationId"] = msg.conversation_id;
             event_json["from"] = msg.from;
             event_json["body"] = msg.body;
             event_json["id"] = msg.id;
-            event_json["type"] = msg.type;
+            event_json["messageType"] = msg.type;
             event_json["timestamp"] = msg.timestamp;
             event_json["parentId"] = msg.parent_id;
 
@@ -417,7 +419,15 @@ void HookManager::dispatch(const std::string& event_type,
                             const std::string& account_id,
                             const std::string& conv_id)
 {
-    // Spawn a detached thread so we don't block the daemon's event loop.
+    // Wait for a concurrency slot (bounded semaphore pattern)
+    // This prevents unbounded thread creation during message floods.
+    {
+        std::unique_lock<std::mutex> lock(concurrency_mtx_);
+        concurrency_cv_.wait(lock, [this]{ return active_hooks_ < max_concurrent_; });
+        active_hooks_++;
+    }
+
+    // Spawn a thread so we don't block the daemon's event loop.
     // Each hook invocation is a separate process — no state leaks.
     std::string cmd = command_;
     int timeout = timeout_;
@@ -425,6 +435,18 @@ void HookManager::dispatch(const std::string& event_type,
     std::string cid = conv_id;
 
     std::thread([this, cmd, event_json, event_type, acc_id, cid, timeout]() {
+        // Release the concurrency slot when done
+        struct SlotGuard {
+            HookManager* hm;
+            ~SlotGuard() {
+                {
+                    std::lock_guard<std::mutex> lock(hm->concurrency_mtx_);
+                    hm->active_hooks_--;
+                }
+                hm->concurrency_cv_.notify_one();
+            }
+        } slot_guard{this};
+
         try {
             jami::log_tag("hook", "Dispatching ", event_type, " to: ", cmd);
 

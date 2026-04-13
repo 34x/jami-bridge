@@ -55,6 +55,9 @@
 
 #include <string>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
+#include <functional>
 
 namespace jami {
 
@@ -80,18 +83,23 @@ HookResult run_hook_command(const std::string& command,
 /// Hook manager — registers event callbacks on a Client and dispatches to hooks.
 ///
 /// When an event matches (based on --hook-events filter), the hook command
-/// is spawned in a detached thread. The hook's stdout is parsed for response
+/// is spawned in a thread. The hook's stdout is parsed for response
 /// actions (reply/replies) which are sent back to the originating conversation.
+///
+/// Concurrency is bounded by a semaphore (default: 8 concurrent hooks)
+/// to prevent resource exhaustion under message floods.
 class HookManager {
 public:
     /// Create a hook manager.
     /// @param client    Client instance (for sending replies)
     /// @param command   Shell command to execute for each event
-    /// @param events    Comma-separated event types to handle
+       /// @param events    Comma-separated event types to handle
     /// @param timeout   Hook process timeout in seconds (0 = no timeout)
+    /// @param max_concurrent  Maximum concurrent hook invocations
     HookManager(Client& client, const std::string& command,
                 const std::string& events = "onMessageReceived",
-                int timeout = 30);
+                int timeout = 30,
+                int max_concurrent = 8);
 
     /// Install event callbacks on the Events struct.
     /// Wraps existing callbacks to also dispatch to the hook.
@@ -102,6 +110,12 @@ private:
     Client& client_;
     std::string command_;
     int timeout_;
+
+    /// Bounded concurrency — semaphore pattern
+    int max_concurrent_;
+    std::mutex concurrency_mtx_;
+    std::condition_variable concurrency_cv_;
+    int active_hooks_ = 0;
 
     /// Which event types to dispatch. True = dispatch to hook.
     bool handle_message_ = false;

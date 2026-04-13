@@ -35,8 +35,10 @@ inline std::string ts() {
     auto time = std::chrono::system_clock::to_time_t(now);
     auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                   now.time_since_epoch()) % 1000;
+    std::tm tm_buf;
+    localtime_r(&time, &tm_buf);
     std::ostringstream oss;
-    oss << std::put_time(std::localtime(&time), "%H:%M:%S")
+    oss << std::put_time(&tm_buf, "%H:%M:%S")
         << '.' << std::setfill('0') << std::setw(3) << ms.count();
     return oss.str();
 }

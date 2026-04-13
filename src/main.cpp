@@ -37,9 +37,9 @@
 #endif
 #include "stdio_server.h"
 #include "config.h"
+#include "event_filter.h"
 
 #include <nlohmann/json.hpp>
-
 #include <iostream>
 #include <cstdlib>
 #include <cstring>
@@ -184,20 +184,29 @@ static std::vector<std::string> resolve_accounts(jami::Client& client, const jam
                 : cfg.account;
 
             if (file_exists(path)) {
-                // ── Check if the account is already loaded ──────────────
+                // ── Pre-check: is this account already loaded? ──────────────
                 // Importing an archive that's already in the daemon creates
-                // a duplicate. Match by exported URI to reuse existing.
-                //
-                // We peek into the archive to get the Jami URI, then
-                // check loaded accounts for a match. The archive is a
-                // gzip file; the daemon can tell us the details after a
-                // trial import, but that has side effects. Instead, we
-                // import and then check if we created a duplicate — if so,
-                // remove the new one and return the existing.
-                //
-                // Simpler approach: import, then check if there's now
-                // more than one account with the same URI. If the import
-                // created a duplicate, remove it and return the original.
+                // a duplicate. First try matching by archivePath to avoid
+                // the import entirely. If no match, import and deduplicate.
+
+                // Try to match by archivePath in existing accounts
+                std::string existing_id;
+                for (const auto& id : accounts) {
+                    auto details = client.account_details(id);
+                    std::string arch_path = details.count("Account.archivePath")
+                        ? details["Account.archivePath"] : "";
+                    if (!arch_path.empty() && arch_path == path) {
+                        existing_id = id;
+                        break;
+                    }
+                }
+
+                if (!existing_id.empty()) {
+                    jami::log("Account already loaded from: ", path, " (id: ", existing_id, ")");
+                    return {existing_id};
+                }
+
+                // No archivePath match — import, then deduplicate if needed
                 jami::log("Importing account from: ", path);
                 std::string new_id = client.import_account(path, cfg.account_password);
                 if (new_id.empty()) {
@@ -222,7 +231,7 @@ static std::vector<std::string> resolve_accounts(jami::Client& client, const jam
                 }
 
                 // Look for duplicate: another loaded account with same URI
-                std::string existing_id;
+                std::string dup_id;
                 for (const auto& id : accounts) {
                     if (id == new_id) continue;  // skip the one we just imported
                     auto details = client.account_details(id);
@@ -233,17 +242,17 @@ static std::vector<std::string> resolve_accounts(jami::Client& client, const jam
                         uri = vd.count("Account.username") ? vd["Account.username"] : "";
                     }
                     if (!uri.empty() && uri == new_uri) {
-                        existing_id = id;
+                        dup_id = id;
                         break;
                     }
                 }
 
-                if (!existing_id.empty()) {
+                if (!dup_id.empty()) {
                     // The imported account is a duplicate — remove it, use the original
-                    jami::log("Account already loaded as: ", existing_id,
+                    jami::log("Account already loaded as: ", dup_id,
                              " — removing duplicate: ", new_id);
                     client.remove_account(new_id);
-                    return {existing_id};
+                    return {dup_id};
                 }
 
                 jami::log("Imported account: ", new_id);
@@ -364,7 +373,9 @@ static int run_cli(jami::Client& client, const jami::Config& cfg) {
         for (const auto& cid : conv_ids) {
             auto info = client.conversation_info(account_id, cid);
             auto members = client.conversation_members(account_id, cid);
-            json mode_val = info.count("mode") ? json(std::stoi(info["mode"])) : json();
+            int mode_int = 0;
+            try { if (info.count("mode")) mode_int = std::stoi(info.at("mode")); } catch (...) {}
+            json mode_val = info.count("mode") ? json(mode_int) : json();
             result.push_back({
                 {"id", cid},
                 {"mode", mode_val},
@@ -428,7 +439,9 @@ int main(int argc, char* argv[]) {
     jami::Events events;
 
     if (cfg.mode == jami::Config::Mode::STDIO) {
-        // In STDIO mode, push events as JSON-RPC notifications
+        // In STDIO mode, push events as JSON-RPC notifications.
+        // All stdout writes go through StdioServer::write_stdout_locked()
+        // to prevent interleaving from daemon callback threads.
         events.on_message_received = [](const jami::Message& msg) {
             json notification;
             notification["jsonrpc"] = "2.0";
@@ -443,7 +456,7 @@ int main(int argc, char* argv[]) {
                 {"timestamp", msg.timestamp},
                 {"parentId", msg.parent_id},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_registration_changed = [](const std::string& account_id,
                                             const std::string& state,
@@ -458,7 +471,7 @@ int main(int argc, char* argv[]) {
                 {"code", code},
                 {"detail", detail},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_conversation_request_received = [](const std::string& account_id,
                                                        const std::string& conv_id,
@@ -474,7 +487,7 @@ int main(int argc, char* argv[]) {
                 {"conversationId", conv_id},
                 {"from", from},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_conversation_ready = [](const std::string& account_id,
                                            const std::string& conv_id) {
@@ -485,7 +498,7 @@ int main(int argc, char* argv[]) {
                 {"accountId", account_id},
                 {"conversationId", conv_id},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_conversation_member_event = [](const std::string& account_id,
                                                     const std::string& conv_id,
@@ -494,14 +507,13 @@ int main(int argc, char* argv[]) {
             json notification;
             notification["jsonrpc"] = "2.0";
             notification["method"] = "onConversationMemberEvent";
-            // event: 0 = add, 1 = joins, 2 = leave, 3 = banned
             notification["params"] = {
                 {"accountId", account_id},
                 {"conversationId", conv_id},
                 {"memberUri", member_uri},
                 {"event", event},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_message_status_changed = [](const std::string& account_id,
                                                const std::string& conversation_id,
@@ -518,7 +530,7 @@ int main(int argc, char* argv[]) {
                 {"messageId", message_id},
                 {"state", state},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_trust_request_received = [](const std::string& account_id,
                                                 const std::string& from_uri,
@@ -531,7 +543,7 @@ int main(int argc, char* argv[]) {
                 {"from", from_uri},
                 {"conversationId", conv_id},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_name_registration_ended = [](const std::string& account_id,
                                                  int state,
@@ -539,13 +551,12 @@ int main(int argc, char* argv[]) {
             json notification;
             notification["jsonrpc"] = "2.0";
             notification["method"] = "onNameRegistrationEnded";
-            // state: 0=success, 1=invalid, 2=already taken, 3=error, 4=unsupported
             notification["params"] = {
                 {"accountId", account_id},
                 {"state", state},
                 {"name", name},
             };
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
         events.on_data_transfer_event = [](const jami::FileTransfer& transfer) {
             json notification;
@@ -564,7 +575,7 @@ int main(int argc, char* argv[]) {
                 notification["params"]["totalSize"] = transfer.total_size;
             if (transfer.bytes_progress > 0)
                 notification["params"]["bytesProgress"] = transfer.bytes_progress;
-            std::cout << notification.dump() << std::endl;
+            jami::StdioServer::write_stdout_locked(notification.dump());
         };
     } else if (cfg.mode == jami::Config::Mode::CLI) {
         // CLI mode: suppress event output, just print command result
@@ -786,113 +797,11 @@ int main(int argc, char* argv[]) {
     // ── Install account filter ─────────────────────────────────────────
     // When --account resolves to a single account, only emit events for
     // that account. This prevents cross-account event leakage when the
-    // daemon has multiple accounts loaded (e.g. data directory has accounts
-    // A and B, but the client only cares about A).
-    //
-    // When serving multiple accounts (no --account specified, multiple
-    // accounts exist), all events are emitted — no filter needed.
+    // daemon has multiple accounts loaded.
 
     if (resolved_accounts.size() == 1) {
         std::string filter_account = resolved_accounts[0];
-
-        // Wrap on_message_received
-        auto orig_msg_cb = std::move(events.on_message_received);
-        events.on_message_received = [filter_account, orig_msg_cb](const jami::Message& msg) {
-            if (msg.account_id == filter_account) {
-                if (orig_msg_cb) orig_msg_cb(msg);
-            }
-        };
-
-        // Wrap on_conversation_ready
-        auto orig_conv_ready_cb = std::move(events.on_conversation_ready);
-        events.on_conversation_ready = [filter_account, orig_conv_ready_cb](
-                const std::string& account_id, const std::string& conv_id) {
-            if (account_id == filter_account) {
-                if (orig_conv_ready_cb) orig_conv_ready_cb(account_id, conv_id);
-            }
-        };
-
-        // Wrap on_conversation_member_event
-        auto orig_member_cb = std::move(events.on_conversation_member_event);
-        events.on_conversation_member_event = [filter_account, orig_member_cb](
-                const std::string& account_id, const std::string& conv_id,
-                const std::string& member_uri, int event) {
-            if (account_id == filter_account) {
-                if (orig_member_cb) orig_member_cb(account_id, conv_id, member_uri, event);
-            }
-        };
-
-        // Wrap on_conversation_request_received
-        auto orig_conv_req_cb = std::move(events.on_conversation_request_received);
-        events.on_conversation_request_received = [filter_account, orig_conv_req_cb](
-                const std::string& account_id, const std::string& conv_id,
-                const std::map<std::string, std::string>& metadatas) {
-            if (account_id == filter_account) {
-                if (orig_conv_req_cb) orig_conv_req_cb(account_id, conv_id, metadatas);
-            }
-        };
-
-        // Wrap on_trust_request_received
-        auto orig_trust_cb = std::move(events.on_trust_request_received);
-        events.on_trust_request_received = [filter_account, orig_trust_cb](
-                const std::string& account_id, const std::string& from_uri,
-                const std::string& conv_id) {
-            if (account_id == filter_account) {
-                if (orig_trust_cb) orig_trust_cb(account_id, from_uri, conv_id);
-            }
-        };
-
-        // Wrap on_registration_changed
-        auto orig_reg_cb = std::move(events.on_registration_changed);
-        events.on_registration_changed = [filter_account, orig_reg_cb](
-                const std::string& account_id, const std::string& state,
-                int code, const std::string& detail) {
-            if (account_id == filter_account) {
-                if (orig_reg_cb) orig_reg_cb(account_id, state, code, detail);
-            }
-        };
-
-        // Wrap on_message_status_changed
-        auto orig_status_cb = std::move(events.on_message_status_changed);
-        events.on_message_status_changed = [filter_account, orig_status_cb](
-                const std::string& account_id, const std::string& conversation_id,
-                const std::string& peer, const std::string& message_id, int state) {
-            if (account_id == filter_account) {
-                if (orig_status_cb) orig_status_cb(account_id, conversation_id, peer, message_id, state);
-            }
-        };
-
-        // Wrap on_name_registration_ended
-        auto orig_name_reg_cb = std::move(events.on_name_registration_ended);
-        events.on_name_registration_ended = [filter_account, orig_name_reg_cb](
-                const std::string& account_id, int state, const std::string& name) {
-            if (account_id == filter_account) {
-                if (orig_name_reg_cb) orig_name_reg_cb(account_id, state, name);
-            }
-        };
-
-        // Wrap on_messages_loaded (sync message loading — pass-through,
-        // but filter for consistency)
-        auto orig_loaded_cb = std::move(events.on_messages_loaded);
-        events.on_messages_loaded = [filter_account, orig_loaded_cb](
-                uint32_t req_id, const std::string& account_id,
-                const std::string& conv_id,
-                const std::vector<libjami::SwarmMessage>& messages) {
-            if (account_id == filter_account) {
-                if (orig_loaded_cb) orig_loaded_cb(req_id, account_id, conv_id, messages);
-            }
-        };
-
-        // Wrap on_data_transfer_event
-        auto orig_transfer_cb = std::move(events.on_data_transfer_event);
-        events.on_data_transfer_event = [filter_account, orig_transfer_cb](
-                const jami::FileTransfer& transfer) {
-            if (transfer.account_id == filter_account) {
-                if (orig_transfer_cb) orig_transfer_cb(transfer);
-            }
-        };
-
-        // Re-register callbacks with the filtered versions
+        filter_events_by_account(events, filter_account);
         client.update_callbacks(events);
         jami::log("Account filter: only emitting events for ", filter_account.substr(0, 8), "...");
     } else if (resolved_accounts.empty()) {
@@ -907,13 +816,13 @@ int main(int argc, char* argv[]) {
         // CLI mode: give daemon time to initialize
         std::this_thread::sleep_for(std::chrono::seconds(2));
         int rc = run_cli(client, cfg);
-        _exit(rc);
+        return rc;  // returning from main() — Client destructor calls libjami::fini()
     }
 
     if (cfg.mode == jami::Config::Mode::STDIO) {
         jami::StdioServer stdio_server(client);
         stdio_server.run();
-        _exit(0);
+        return 0;  // Client destructor runs, daemon cleans up
     }
 
     // HTTP mode
@@ -922,5 +831,5 @@ int main(int argc, char* argv[]) {
     server.run();
 
     jami::log("Shutting down...");
-    _exit(0);
+    return 0;  // Client destructor runs, daemon cleans up;
 }

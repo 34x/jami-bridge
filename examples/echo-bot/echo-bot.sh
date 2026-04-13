@@ -19,6 +19,7 @@
 set -euo pipefail
 
 # Only handle messages (but --hook-events defaults to this)
+# Using "eventType" (not "type") to check the event type
 if [ "$JAMI_EVENT_TYPE" != "onMessageReceived" ]; then
     exit 0
 fi

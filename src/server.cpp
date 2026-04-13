@@ -53,6 +53,7 @@
 #include "server.h"
 #include "client.h"
 #include "api_docs.h"
+#include "util.h"
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
@@ -65,22 +66,6 @@
 using json = nlohmann::json;
 
 namespace jami {
-
-// Helper: convert map<string,string> to JSON object
-static json map_to_json(const std::map<std::string, std::string>& m) {
-    json j;
-    for (const auto& [k, v] : m) {
-        j[k] = v;
-    }
-    return j;
-}
-
-// Helper: extract path parameter from URL match (cpp-httplib v0.18+)
-static std::string get_match(const httplib::Request& req, size_t idx) {
-    if (idx < req.matches.size())
-        return req.matches[idx];
-    return "";
-}
 
 // Helper: success JSON response
 static void json_ok(httplib::Response& res, const json& body) {
@@ -118,6 +103,10 @@ void Server::setup_routes(httplib::Server* svr) {
     svr->set_idle_interval(0, 500000); // 500ms idle timeout (microseconds)
 
     // ── CORS ────────────────────────────────────────────────────────
+    // WARNING: Access-Control-Allow-Origin: * means ANY website on the
+    // internet can call this API. This is intentional for local dev/bot
+    // usage, but on a network-facing deployment, consider restricting
+    // to specific origins or adding authentication.
     svr->set_default_headers({
         {"Access-Control-Allow-Origin", "*"},
         {"Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS"},
@@ -127,13 +116,13 @@ void Server::setup_routes(httplib::Server* svr) {
 
     // ── Health ──────────────────────────────────────────────────────
     svr->Get("/api/ping", [](const httplib::Request&, httplib::Response& res) {
-        json_ok(res, json{{"status", "ok"}, {"version", "0.2.0"}});
+        json_ok(res, json{{"status", "ok"}, {"version", jami::VERSION}});
     });
 
     // ── Version ────────────────────────────────────────────────────
     svr->Get("/api/version", [](const httplib::Request&, httplib::Response& res) {
         json_ok(res, json{
-            {"version", "0.2.0"},
+            {"version", jami::VERSION},
             {"daemon", "jami"},
             {"mode", "library"},
             {"api", "REST+STDIO+CLI+hook"},
@@ -265,7 +254,9 @@ void Server::setup_routes(httplib::Server* svr) {
         for (const auto& cid : conv_ids) {
             auto info = client_.conversation_info(account_id, cid);
             auto members = client_.conversation_members(account_id, cid);
-            json mode_val = info.count("mode") ? json(std::stoi(info["mode"])) : json();
+            int mode_int = 0;
+            try { if (info.count("mode")) mode_int = std::stoi(info.at("mode")); } catch (...) {}
+            json mode_val = info.count("mode") ? json(mode_int) : json();
             json entry = {
                 {"id", cid},
                 {"mode", mode_val},
@@ -308,7 +299,9 @@ void Server::setup_routes(httplib::Server* svr) {
             members_json.push_back(json{{"uri", m.uri}, {"role", m.role}});
         }
 
-        json mode_val = info.count("mode") ? json(std::stoi(info["mode"])) : json();
+        int mode_int = 0;
+        try { if (info.count("mode")) mode_int = std::stoi(info.at("mode")); } catch (...) {}
+        json mode_val = info.count("mode") ? json(mode_int) : json();
         json_ok(res, json{
             {"account_id", account_id},
             {"conversation_id", conv_id},
@@ -394,7 +387,7 @@ void Server::setup_routes(httplib::Server* svr) {
     });
 
     // Decline request
-    svr->Post(R"(/api/accounts/([^/])/requests/([^/]+)/decline)", [this](const httplib::Request& req, httplib::Response& res) {
+    svr->Post(R"(/api/accounts/([^/]+)/requests/([^/]+)/decline)", [this](const httplib::Request& req, httplib::Response& res) {
         std::string account_id = req.matches[1];
         std::string conv_id = req.matches[2];
         client_.decline_request(account_id, conv_id);

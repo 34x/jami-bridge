@@ -101,7 +101,6 @@ Client::Client(const Events& events, bool debug)
                 auto from_it = swarm_msg.body.find("author");
                 if (from_it != swarm_msg.body.end()) msg.from = from_it->second;
                 if (events_.on_message_received) {
-                    stats_.messages_received++;
                     events_.on_message_received(msg);
                 }
             }),
@@ -208,6 +207,19 @@ Client::Client(const Events& events, bool debug)
                    const std::string& account_id,
                    const std::string& conv_id,
                    std::vector<libjami::SwarmMessage> messages) {
+                // 1) Notify any waiting load_messages_sync() call
+                {
+                    std::lock_guard<std::mutex> lock(sync_load_mtx_);
+                    auto& s = sync_load_state_;
+                    if (!s.done && s.account_id == account_id && s.conv_id == conv_id) {
+                        s.req_id = id;
+                        s.messages = messages;
+                        s.done = true;
+                    }
+                }
+                sync_load_cv_.notify_all();
+
+                // 2) Chain to user callback
                 if (events_.on_messages_loaded) {
                     events_.on_messages_loaded(id, account_id, conv_id, messages);
                 }
@@ -431,35 +443,23 @@ std::vector<libjami::SwarmMessage> Client::load_messages_sync(
         const std::string& from_id,
         size_t count,
         int timeout_ms) {
-    std::mutex mtx;
-    std::condition_variable cv;
-    bool done = false;
-    std::vector<libjami::SwarmMessage> result;
-
-    // Save old callback and install our temporary one
-    auto old_cb = events_.on_messages_loaded;
-    events_.on_messages_loaded = [&](uint32_t id,
-                                          const std::string& acc_id,
-                                          const std::string& c_id,
-                                          const std::vector<libjami::SwarmMessage>& msgs) {
-        if (acc_id == account_id && c_id == conv_id) {
-            result = msgs;
-            done = true;
-            cv.notify_one();
-        }
-    };
+    // Reset the sync state before requesting
+    {
+        std::lock_guard<std::mutex> lock(sync_load_mtx_);
+        sync_load_state_ = {};
+        sync_load_state_.account_id = account_id;
+        sync_load_state_.conv_id = conv_id;
+    }
 
     // Request messages
     load_messages(account_id, conv_id, from_id, count);
 
-    // Wait for response
-    std::unique_lock<std::mutex> lock(mtx);
-    cv.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&]{ return done; });
+    // Wait for SwarmLoaded signal to fill the state
+    std::unique_lock<std::mutex> lock(sync_load_mtx_);
+    sync_load_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms),
+        [this]{ return sync_load_state_.done; });
 
-    // Restore old callback
-    events_.on_messages_loaded = old_cb;
-
-    return result;
+    return std::move(sync_load_state_.messages);
 }
 
 // ── Contacts & Trust ─────────────────────────────────────────────────────

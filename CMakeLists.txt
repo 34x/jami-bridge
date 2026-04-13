@@ -77,6 +77,7 @@ set(SOURCES
     src/stdio_server.cpp
     src/api_docs.cpp
     src/config.cpp
+    src/event_filter.cpp
 )
 
 # Hook support uses POSIX fork/exec/pipes — only available on Unix-like systems.

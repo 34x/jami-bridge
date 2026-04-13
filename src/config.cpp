@@ -128,34 +128,29 @@ int Config::parse_args(int argc, char* argv[]) {
         std::string arg = argv[i];
 
         if (arg == "--host" && i + 1 < argc) {
-            host = argv[++i];
+            host = argv[++i]; cli_set_.insert("host");
         } else if (arg == "--port" && i + 1 < argc) {
-            port = std::atoi(argv[++i]);
+            port = std::atoi(argv[++i]); cli_set_.insert("port");
         } else if (arg == "--debug") {
-            debug = true;
+            debug = true; cli_set_.insert("debug");
         } else if (arg == "--stdio") {
-            mode = Mode::STDIO;
+            mode = Mode::STDIO; cli_set_.insert("mode");
         } else if (arg == "--send-message") {
-            mode = Mode::CLI;
-            cli_command = "send-message";
+            mode = Mode::CLI; cli_set_.insert("mode"); cli_command = "send-message";
         } else if (arg == "--list-accounts") {
-            mode = Mode::CLI;
-            cli_command = "list-accounts";
+            mode = Mode::CLI; cli_set_.insert("mode"); cli_command = "list-accounts";
         } else if (arg == "--list-conversations") {
-            mode = Mode::CLI;
-            cli_command = "list-conversations";
+            mode = Mode::CLI; cli_set_.insert("mode"); cli_command = "list-conversations";
         } else if (arg == "--load-messages") {
-            mode = Mode::CLI;
-            cli_command = "load-messages";
+            mode = Mode::CLI; cli_set_.insert("mode"); cli_command = "load-messages";
         } else if (arg == "--stats") {
-            mode = Mode::CLI;
-            cli_command = "stats";
+            mode = Mode::CLI; cli_set_.insert("mode"); cli_command = "stats";
         } else if (arg == "--account" && i + 1 < argc) {
-            account = argv[++i];
+            account = argv[++i]; cli_set_.insert("account");
         } else if (arg == "--account-alias" && i + 1 < argc) {
-            account_alias = argv[++i];
+            account_alias = argv[++i]; cli_set_.insert("accountAlias");
         } else if (arg == "--account-password" && i + 1 < argc) {
-            account_password = argv[++i];
+            account_password = argv[++i]; cli_set_.insert("accountPassword");
         } else if (arg == "--conversation" && i + 1 < argc) {
             conversation_id = argv[++i];
         } else if (arg == "--body" && i + 1 < argc) {
@@ -163,25 +158,28 @@ int Config::parse_args(int argc, char* argv[]) {
         } else if (arg == "--count" && i + 1 < argc) {
             count = std::atoi(argv[++i]);
         } else if (arg == "--data-dir" && i + 1 < argc) {
-            data_dir = argv[++i];
+            data_dir = argv[++i]; cli_set_.insert("dataDir");
         } else if (arg == "--config-dir" && i + 1 < argc) {
-            config_dir = argv[++i];
+            config_dir = argv[++i]; cli_set_.insert("configDir");
         } else if (arg == "--cache-dir" && i + 1 < argc) {
-            cache_dir = argv[++i];
+            cache_dir = argv[++i]; cli_set_.insert("cacheDir");
         } else if (arg == "--hook" && i + 1 < argc) {
-            hook_command = argv[++i];
+            hook_command = argv[++i]; cli_set_.insert("hookCommand");
         } else if (arg == "--hook-events" && i + 1 < argc) {
-            hook_events = argv[++i];
+            hook_events = argv[++i]; cli_set_.insert("hookEvents");
         } else if (arg == "--hook-timeout" && i + 1 < argc) {
-            hook_timeout = std::atoi(argv[++i]);
+            hook_timeout = std::atoi(argv[++i]); cli_set_.insert("hookTimeout");
         } else if (arg == "--auto-accept") {
             auto_accept = 0;  // accept all
             auto_accept_all_explicit = true;
+            cli_set_.insert("autoAccept");
         } else if (arg == "--auto-accept-from" && i + 1 < argc) {
             auto_accept = 1;  // accept from owner only
             auto_accept_from = argv[++i];
+            cli_set_.insert("autoAcceptFrom");
         } else if (arg == "--reject-unknown") {
             auto_accept = 2;  // reject all
+            cli_set_.insert("rejectUnknown");
         } else if (arg == "--config" && i + 1 < argc) {
             config_file = argv[++i];
         } else if (arg == "--help") {
@@ -201,12 +199,9 @@ int Config::parse_args(int argc, char* argv[]) {
     }
 
     // Re-apply CLI args over config file values.
-    // We need to re-parse because config file values were filled in,
-    // but CLI should take precedence. Since we set from CLI first,
-    // then loaded config, we need to re-apply CLI.
-    // Simpler: track which args were explicitly set from CLI.
-    // Actually, we already set CLI values first, then load_config_file()
-    // only fills in values that are still at defaults. So CLI always wins.
+    // We track which args were explicitly set from CLI via cli_set_.
+    // load_config_file() only fills in values that weren't set from CLI.
+    // So CLI always wins — no fragile default-value comparisons.
 
     // Set default account alias if creating a new account
     if (account_alias.empty()) {
@@ -244,64 +239,61 @@ int Config::load_config_file() {
     }
 
     // Only override values that haven't been set from CLI.
-    // We check for "still at default" by comparing against defaults.
-    // This is imperfect but works for our use case.
+    // cli_set_ tracks explicitly-set CLI args — robust, no default-value guessing.
 
-    if (cfg.count("host") && host == "0.0.0.0") {
+    if (cfg.count("host") && cli_set_.count("host") == 0) {
         host = cfg["host"].get<std::string>();
     }
-    if (cfg.count("port") && port == 8090) {
+    if (cfg.count("port") && cli_set_.count("port") == 0) {
         port = cfg["port"].get<int>();
     }
-    if (cfg.count("debug") && !debug) {
+    if (cfg.count("debug") && cli_set_.count("debug") == 0) {
         debug = cfg["debug"].get<bool>();
     }
-    if (cfg.count("dataDir") && data_dir.empty()) {
+    if (cfg.count("dataDir") && cli_set_.count("dataDir") == 0) {
         data_dir = cfg["dataDir"].get<std::string>();
     }
-    if (cfg.count("configDir") && config_dir.empty()) {
+    if (cfg.count("configDir") && cli_set_.count("configDir") == 0) {
         config_dir = cfg["configDir"].get<std::string>();
     }
-    if (cfg.count("cacheDir") && cache_dir.empty()) {
+    if (cfg.count("cacheDir") && cli_set_.count("cacheDir") == 0) {
         cache_dir = cfg["cacheDir"].get<std::string>();
     }
-    if (cfg.count("account") && account.empty()) {
+    if (cfg.count("account") && cli_set_.count("account") == 0) {
         account = cfg["account"].get<std::string>();
     }
-    if (cfg.count("accountAlias") && account_alias == "bot") {
+    if (cfg.count("accountAlias") && cli_set_.count("accountAlias") == 0) {
         account_alias = cfg["accountAlias"].get<std::string>();
     }
-    if (cfg.count("accountPassword") && account_password.empty()) {
+    if (cfg.count("accountPassword") && cli_set_.count("accountPassword") == 0) {
         account_password = cfg["accountPassword"].get<std::string>();
     }
     if (cfg.count("hook") && cfg["hook"].is_object()) {
         auto& hook = cfg["hook"];
-        if (hook.count("command") && hook_command.empty()) {
+        if (hook.count("command") && cli_set_.count("hookCommand") == 0) {
             hook_command = hook["command"].get<std::string>();
         }
-        if (hook.count("events") && hook_events == "onMessageReceived") {
+        if (hook.count("events") && cli_set_.count("hookEvents") == 0) {
             hook_events = hook["events"].get<std::string>();
         }
-        if (hook.count("timeout") && hook_timeout == 30) {
+        if (hook.count("timeout") && cli_set_.count("hookTimeout") == 0) {
             hook_timeout = hook["timeout"].get<int>();
         }
     }
 
     // Invite policy
-    if (cfg.count("autoAccept") && auto_accept == -1) {
-        if (cfg["autoAccept"].is_boolean()) {
-            auto_accept = cfg["autoAccept"].get<bool>() ? 0 : -1;
-            if (auto_accept == 0) auto_accept_all_explicit = true;
-        }
+    if (cfg.count("autoAccept") && cli_set_.count("autoAccept") == 0
+        && cfg["autoAccept"].is_boolean() && cfg["autoAccept"].get<bool>()) {
+        auto_accept = 0;
+        auto_accept_all_explicit = true;
     }
-    if (cfg.count("autoAcceptFrom") && auto_accept_from.empty()) {
+    if (cfg.count("autoAcceptFrom") && cli_set_.count("autoAcceptFrom") == 0) {
         auto_accept = 1;  // owner-only mode
         auto_accept_from = cfg["autoAcceptFrom"].get<std::string>();
     }
-    if (cfg.count("rejectUnknown") && auto_accept == -1) {
-        if (cfg["rejectUnknown"].is_boolean() && cfg["rejectUnknown"].get<bool>()) {
-            auto_accept = 2;  // reject all
-        }
+    if (cfg.count("rejectUnknown") && cli_set_.count("rejectUnknown") == 0
+        && cfg["rejectUnknown"].is_boolean() && cfg["rejectUnknown"].get<bool>()) {
+        auto_accept = 2;  // reject all
     }
     // Config file conflict: both autoAccept and autoAcceptFrom
     if (cfg.count("autoAccept") && cfg.count("autoAcceptFrom")

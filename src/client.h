@@ -359,6 +359,20 @@ private:
     std::atomic<bool> running_{false};
     std::mutex cb_mutex_;  ///< Protects callback registration
     Stats stats_;          ///< Runtime statistics
+
+    // ── Synchronous message loading support ──────────────────────────
+    // Used by load_messages_sync() to wait for SwarmLoaded responses
+    // without swapping the on_messages_loaded callback (which would race
+    // with the daemon signal handler thread).
+    std::mutex sync_load_mtx_;
+    std::condition_variable sync_load_cv_;
+    struct SyncLoadState {
+        uint32_t req_id = 0;
+        std::string account_id;
+        std::string conv_id;
+        std::vector<libjami::SwarmMessage> messages;
+        bool done = false;
+    } sync_load_state_;
 };
 
 } // namespace jami

@@ -56,9 +56,17 @@ public:
     /// Blocks until EOF on stdin or a "shutdown" request.
     void run();
 
+    /// Thread-safe write a line to stdout (used by both request handling
+    /// and event notification threads).
+    static void write_stdout_locked(const std::string& line);
+
 private:
     Client& client_;
     std::atomic<bool> running_{false};
+
+    /// Mutex for all stdout writes — daemon callbacks fire from
+    /// different threads and must not interleave with responses.
+    static std::mutex stdout_mtx_;
 
     /// Process a single JSON-RPC request and return the response.
     std::string handle_request(const std::string& json_line);

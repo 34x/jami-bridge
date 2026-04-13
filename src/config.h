@@ -46,6 +46,7 @@
 
 #include <string>
 #include <map>
+#include <set>
 
 namespace jami {
 
@@ -139,6 +140,10 @@ struct Config {
     /// Path to JSON config file. If set, values are loaded from here
     /// first, then overridden by CLI arguments.
     std::string config_file;
+
+    /// Which settings were explicitly set from CLI args.
+    /// Used by load_config_file() to avoid overriding CLI values.
+    std::set<std::string> cli_set_;
 
     // ── Methods ────────────────────────────────────────────────────────
 

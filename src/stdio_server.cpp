@@ -64,6 +64,7 @@
 
 #include "log.h"
 #include "stdio_server.h"
+#include "util.h"
 
 #include <nlohmann/json.hpp>
 
@@ -77,18 +78,18 @@ using json = nlohmann::json;
 
 namespace jami {
 
-// Helper: convert map<string,string> to JSON object
-static json map_to_json(const std::map<std::string, std::string>& m) {
-    json j;
-    for (const auto& [k, v] : m) {
-        j[k] = v;
-    }
-    return j;
+// Static mutex definition
+std::mutex StdioServer::stdout_mtx_;
+
+// Thread-safe write to stdout
+void StdioServer::write_stdout_locked(const std::string& line) {
+    std::lock_guard<std::mutex> lock(stdout_mtx_);
+    std::cout << line << std::endl;
 }
 
-// Write a line to stdout (thread-safe with stderr for logging)
+// Write a line to stdout (legacy — not thread-safe)
 static void write_stdout(const std::string& line) {
-    std::cout << line << std::endl;
+    StdioServer::write_stdout_locked(line);
 }
 
 StdioServer::StdioServer(Client& client)
@@ -185,12 +186,12 @@ std::string StdioServer::handle_request(const std::string& json_line) {
     try {
 
     if (method == "ping") {
-        return make_result({{"status", "ok"}, {"version", "0.2.0"}});
+        return make_result({{"status", "ok"}, {"version", jami::VERSION}});
     }
 
     if (method == "version") {
         return make_result({
-            {"version", "0.2.0"},
+            {"version", jami::VERSION},
             {"daemon", "jami"},
             {"mode", "library"},
             {"api", "REST+STDIO+CLI+hook"},
@@ -308,7 +309,9 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         for (const auto& cid : conv_ids) {
             auto info = client_.conversation_info(account_id, cid);
             auto members = client_.conversation_members(account_id, cid);
-            json mode_val = info.count("mode") ? json(std::stoi(info["mode"])) : json();
+            int mode_int = 0;
+            try { if (info.count("mode")) mode_int = std::stoi(info.at("mode")); } catch (...) {}
+            json mode_val = info.count("mode") ? json(mode_int) : json();
             conv_list.push_back({
                 {"id", cid},
                 {"mode", mode_val},
@@ -340,7 +343,9 @@ std::string StdioServer::handle_request(const std::string& json_line) {
             members_json.push_back({{"uri", m.uri}, {"role", m.role}});
         }
 
-        json mode_val = info.count("mode") ? json(std::stoi(info["mode"])) : json();
+        int mode_int = 0;
+        try { if (info.count("mode")) mode_int = std::stoi(info.at("mode")); } catch (...) {}
+        json mode_val = info.count("mode") ? json(mode_int) : json();
         return make_result({
             {"accountId", account_id},
             {"conversationId", conv_id},
