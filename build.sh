@@ -218,28 +218,63 @@ dev_run() {
     cp "$BUILD_DIR/jami-bridge" "$dev_dist/jami-bridge"
     chmod +x "$dev_dist/jami-bridge"
 
-    # Copy bundled libs from the dev container (only needed once)
-    if [ ! -f "$dev_dist/lib/libjami.so.16.0.0" ]; then
-        echo "=== Copying bundled libs from dev container (one-time) ==="
+    # Copy bundled libs from the dev container (only needed once).
+    # Bundles ALL non-glibc shared libraries for cross-distro portability.
+    # Must iterate because ldd only resolves direct deps — transitive deps
+    # of newly bundled libs are discovered in subsequent passes.
+    if [ ! -f "$dev_dist/lib/libjami.so.16.0.0" ] || [ $(ls "$dev_dist/lib/" 2>/dev/null | wc -l) -lt 10 ]; then
+        echo "=== Bundling all non-glibc libs from dev container (one-time) ==="
         podman exec "$DEV_CONTAINER" bash -c '
+            set -e
             mkdir -p /tmp/dev-dist/lib
+
+            # Copy libjami
             cp /usr/local/lib64/libjami.so.16.0.0 /tmp/dev-dist/lib/
-            cp /usr/lib64/libgit2.so.1.9.2 /tmp/dev-dist/lib/
-            cp /usr/lib64/libsecp256k1.so.5.0.0 /tmp/dev-dist/lib/
-            cp /usr/lib64/libllhttp.so.9.3.1 /tmp/dev-dist/lib/
+
+            # Iteratively resolve ALL transitive deps.
+            # Each pass discovers deps of newly bundled libs.
+            changed=1
+            while [ "$changed" -ne 0 ]; do
+                changed=0
+                for lib_path in $( \
+                    LD_LIBRARY_PATH=/tmp/dev-dist/lib ldd /tmp/dev-dist/lib/*.so.* \
+                    | grep -oP "/[^\s:]+" \
+                    | sort -u \
+                ); do \
+                    lib_name=$(basename "$lib_path"); \
+                    case "$lib_name" in \
+                        ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*) \
+                            continue ;; \
+                    esac; \
+                    [ -f "/tmp/dev-dist/lib/$lib_name" ] && continue;
+                    # Skip non-library entries (e.g. binary paths from ldd args)
+                    case "$lib_name" in *.so*) ;; *) continue ;; esac; \
+                    cp -L "$lib_path" "/tmp/dev-dist/lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"; \
+                done; \
+            done
+            echo "=== Bundle complete: $(ls /tmp/dev-dist/lib/*.so.* 2>/dev/null | wc -l) libraries ==="
+
+            # Patch RUNPATH on all bundled libs
             cd /tmp/dev-dist/lib
-            ln -sf libjami.so.16.0.0 libjami.so.16
-            ln -sf libjami.so.16 libjami.so
-            ln -sf libgit2.so.1.9.2 libgit2.so.1.9
-            ln -sf libsecp256k1.so.5.0.0 libsecp256k1.so.5
-            ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
-            patchelf --set-rpath \$ORIGIN libjami.so.16.0.0 2>/dev/null || true
-            patchelf --set-rpath \$ORIGIN libgit2.so.1.9.2 2>/dev/null || true
-            patchelf --set-rpath \$ORIGIN libsecp256k1.so.5.0.0 2>/dev/null || true
-            patchelf --set-rpath \$ORIGIN libllhttp.so.9.3.1 2>/dev/null || true
+            for so in *.so*; do
+                [ -L "$so" ] && continue
+                patchelf --set-rpath \$ORIGIN "$so" 2>/dev/null || true
+            done
+
+            # Create symlinks for versioned libs
+            for so in *.so.*.*; do
+                [ -L "$so" ] && continue
+                major="${so%.so.*}.so.$(echo "$so" | sed "s/.*\.so\.//; s/\..*//")"
+                [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null
+            done
+            for so in *.so.*; do
+                [ -L "$so" ] && continue
+                base="${so%.so.*}.so"
+                [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" 2>/dev/null || true
+            done
         '
         podman cp "$DEV_CONTAINER":/tmp/dev-dist/lib/. "$dev_dist/lib/"
-        echo "=== Bundled libs copied ==="
+        echo "=== All libs bundled ==="
     fi
 
     # Run the dev binary in a fresh runtime container with the dist mounted
@@ -257,6 +292,7 @@ dev_run() {
     podman run --rm \
         -p "$run_port:$run_port" \
         -v "$dev_dist:/opt/jami-bridge:Z" \
+        -e LD_LIBRARY_PATH=/opt/jami-bridge/lib \
         localhost/$IMAGE_RUNTIME \
         /opt/jami-bridge/jami-bridge "${@:- --host 0.0.0.0 --port 8090}"
 }
@@ -293,42 +329,78 @@ dist_from_dev() {
         exit 1
     fi
 
-    # Create a temporary dist directory inside the container
+    # Create a fully self-contained dist inside the container.
+    # ALL non-glibc shared libraries are bundled so the dist works
+    # across Linux distros (any system with glibc 2.35+).
     podman exec "$DEV_CONTAINER" bash -c '
         set -e
         mkdir -p /tmp/dist/jami-bridge-dist/lib
 
         # Copy binary
         cp /build/jami-bridge/build/jami-bridge /tmp/dist/jami-bridge-dist/jami-bridge
+        chmod +x /tmp/dist/jami-bridge-dist/jami-bridge
 
         # Copy libjami.so
         cp /usr/local/lib64/libjami.so.16.0.0 /tmp/dist/jami-bridge-dist/lib/libjami.so.16.0.0
 
-        # Copy system libraries that may not be on the host
-        cp /usr/lib64/libgit2.so.1.9.2 /tmp/dist/jami-bridge-dist/lib/libgit2.so.1.9.2
-        cp /usr/lib64/libsecp256k1.so.5.0.0 /tmp/dist/jami-bridge-dist/lib/libsecp256k1.so.5.0.0
-        cp /usr/lib64/libllhttp.so.9.3.1 /tmp/dist/jami-bridge-dist/lib/libllhttp.so.9.3.1
+        # Bundle ALL non-glibc shared libraries for cross-distro portability.
+        # glibc core (libc, libm, libdl, libpthread, ld-linux, linux-vdso)
+        # is guaranteed on every Linux host — skip those.
+        # Must iterate because ldd only resolves direct deps — transitive
+        # deps of newly bundled libs are discovered in subsequent passes.
+        cd /tmp/dist/jami-bridge-dist
+        echo "=== Bundling all non-glibc shared libraries (iterative) ==="
+        changed=1
+        while [ "$changed" -ne 0 ]; do
+            changed=0
+            for lib_path in $( \
+                LD_LIBRARY_PATH=/tmp/dist/jami-bridge-dist/lib ldd ./jami-bridge ./lib/*.so.* \
+                | grep -oP "/[^\s:]+" \
+                | sort -u \
+            ); do \
+                lib_name=$(basename "$lib_path"); \
+                case "$lib_name" in \
+                    ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*) \
+                        continue ;; \
+                esac; \
+                [ -f "lib/$lib_name" ] && continue;
+                # Skip non-library entries (e.g. binary paths from ldd args)
+                case "$lib_name" in *.so*) ;; *) continue ;; esac; \
+                cp -L "$lib_path" "lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"; \
+            done; \
+        done
+        echo "=== Bundle complete: $(ls lib/*.so.* 2>/dev/null | wc -l) libraries ===" 
 
-        # Create symlinks
-        cd /tmp/dist/jami-bridge-dist/lib
-        ln -sf libjami.so.16.0.0 libjami.so.16
-        ln -sf libjami.so.16 libjami.so
-        ln -sf libgit2.so.1.9.2 libgit2.so.1.9
-        ln -sf libsecp256k1.so.5.0.0 libsecp256k1.so.5
-        ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
+        # Patch RUNPATH on ALL bundled libs so they find each other
+        echo "=== Patching RUNPATH on all bundled libs ==="
+        for so in lib/*.so*; do
+            [ -L "$so" ] && continue
+            patchelf --set-rpath \$ORIGIN "$so" 2>/dev/null || true
+        done
 
-        # Patch RPATH on bundled libs
-        patchelf --set-rpath \$ORIGIN /tmp/dist/jami-bridge-dist/lib/libjami.so.16.0.0
-        patchelf --set-rpath \$ORIGIN /tmp/dist/jami-bridge-dist/lib/libgit2.so.1.9.2
-        patchelf --set-rpath \$ORIGIN /tmp/dist/jami-bridge-dist/lib/libsecp256k1.so.5.0.0
-        patchelf --set-rpath \$ORIGIN /tmp/dist/jami-bridge-dist/lib/libllhttp.so.9.3.1
+        # Create symlinks for versioned libs
+        echo "=== Creating symlinks ==="
+        cd lib
+        for so in *.so.*.*; do
+            [ -L "$so" ] && continue
+            major="${so%.so.*}.so.$(echo "$so" | sed "s/.*\.so\.//; s/\..*//")"
+            [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null
+        done
+        for so in *.so.*; do
+            [ -L "$so" ] && continue
+            base="${so%.so.*}.so"
+            [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" 2>/dev/null || true
+        done
 
-        chmod +x /tmp/dist/jami-bridge-dist/jami-bridge
+        # Verify all libraries resolve
+        echo "=== Verifying library resolution ==="
+        cd /tmp/dist/jami-bridge-dist
+        LD_LIBRARY_PATH=/tmp/dist/jami-bridge-dist/lib ldd ./jami-bridge | grep "not found" && echo "ERROR: Missing libs!" && exit 1 || echo "All libs resolved."
 
-        # Verify
         echo "=== Dist contents ==="
         du -sh /tmp/dist/jami-bridge-dist/
         ls -lh /tmp/dist/jami-bridge-dist/
+        echo "=== Bundled libraries ==="
         ls -lh /tmp/dist/jami-bridge-dist/lib/
 
         # Create tarball

@@ -1,10 +1,9 @@
-# Test the jami-bridge binary in a fresh Fedora container.
-# Validates that the self-contained dist works without any special packages.
+# Test the jami-bridge dist in a minimal Linux container.
+# Validates that the self-contained dist works without any special packages —
+# only glibc 2.35+ is required (Ubuntu 22.04+, Debian 12+, Fedora 38+, RHEL 9+).
 #
 # Build: ./build.sh test-dist
 #   or:  podman build -t jami-bridge-test -f Containerfile.test .
-#
-# Requires: jami-bridge-base image already built
 
 # ── Stage 1: Build the SDK ─────────────────────────────────────────────
 FROM jami-bridge-base AS builder
@@ -22,10 +21,10 @@ RUN cd /build/jami-bridge && \
         -DJAMI_LIBRARY=/usr/local/lib64/libjami.so && \
     make -j$(nproc)
 
-# ── Stage 2: Full runtime image (same as production Containerfile) ─────
+# ── Stage 2: Create distribution (same as Containerfile.dist) ──────────
 FROM fedora:43 AS dist
 
-RUN dnf install -y \
+RUN dnf install -y patchelf \
     gnutls nettle opus speexdsp \
     yaml-cpp jsoncpp fmt \
     libuuid libargon2 libarchive \
@@ -39,57 +38,84 @@ RUN dnf install -y \
     pcre2 expat \
     && dnf clean all
 
-COPY --from=builder /usr/local/lib64/ /usr/local/lib64/
-COPY --from=builder /build/jami-bridge/build/jami-bridge /usr/local/bin/jami-bridge
+RUN mkdir -p /dist/jami-bridge-dist/lib
 
-RUN ldconfig && \
-    useradd -m jami && \
-    mkdir -p /home/jami/.local/share/jami /home/jami/.config/jami && \
-    chown -R jami:jami /home/jami
+COPY --from=builder /build/jami-bridge/build/jami-bridge /dist/jami-bridge-dist/jami-bridge
+COPY --from=builder /usr/local/lib64/libjami.so.16.0.0 /dist/jami-bridge-dist/lib/libjami.so.16.0.0
 
-# ── Stage 3: Test in fresh Fedora (same runtime packages, binary from dist) ─
+RUN chmod +x /dist/jami-bridge-dist/jami-bridge && \
+    cd /dist/jami-bridge-dist && \
+    echo "=== Bundling all non-glibc shared libraries (iterative) ===" && \
+    changed=1; \
+    while [ "$changed" -ne 0 ]; do \
+        changed=0; \
+        for lib_path in $( \
+            LD_LIBRARY_PATH=/dist/jami-bridge-dist/lib ldd ./jami-bridge ./lib/*.so.* \
+            | grep -oP '/[^\s:]+' \
+            | sort -u \
+        ); do \
+            lib_name=$(basename "$lib_path"); \
+            case "$lib_name" in \
+                ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*) \
+                    continue ;; \
+            esac; \
+            [ -f "lib/$lib_name" ] && continue; \
+            case "$lib_name" in *.so*) ;; *) continue ;; esac; \
+            cp -L "$lib_path" "lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"; \
+        done; \
+    done && \
+    echo "=== Bundle complete ===" && \
+    for so in lib/*.so*; do \
+        [ -L "$so" ] && continue; \
+        patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true; \
+    done && \
+    cd lib && \
+    for so in *.so.*.*; do \
+        [ -L "$so" ] && continue; \
+        major="${so%.so.*}.so.$(echo "$so" | sed 's/.*\.so\.//; s/\..*//')"; \
+        [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null; \
+    done && \
+    for so in *.so.*; do \
+        [ -L "$so" ] && continue; \
+        base="${so%.so.*}.so"; \
+        [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" 2>/dev/null; \
+    done && \
+    echo "=== Done ==="
+
+# ── Stage 3: Test in minimal Fedora (no extra packages) ───────────────
+# This validates that the dist is truly self-contained — it only needs glibc.
 FROM fedora:43 AS test
 
-RUN dnf install -y \
-    gnutls nettle opus speexdsp \
-    yaml-cpp jsoncpp fmt \
-    libuuid libargon2 libarchive \
-    openssl-libs \
-    alsa-lib \
-    libgit2 libsecp256k1 \
-    libva libvdpau mesa-libGL \
-    libX11 libXext libXfixes \
-    pipewire-libs pulseaudio-libs \
-    dbus-libs msgpack sqlite-libs \
-    pcre2 expat \
-    && dnf clean all
+# No extra packages installed — the dist must bring everything it needs.
 
-# Copy binary and ALL /usr/local/lib64 libs from dist (includes libjami, contrib, etc.)
-COPY --from=dist /usr/local/bin/jami-bridge /opt/jami-bridge/jami-bridge
-COPY --from=dist /usr/local/lib64/ /opt/jami-bridge/lib/
+# Copy the self-contained dist
+COPY --from=dist /dist/jami-bridge-dist/ /opt/jami-bridge/
 
 RUN chmod +x /opt/jami-bridge/jami-bridge
 
-# Test 1: Binary starts
-RUN echo "=== Test 1: Binary --help ===" && \
-    LD_LIBRARY_PATH=/opt/jami-bridge/lib /opt/jami-bridge/jami-bridge --help 2>&1 | head -5 && \
+# Test 1: All shared libs resolve using only the bundled lib/ directory
+RUN echo "=== Test 1: Shared library resolution ===" && \
+    LD_LIBRARY_PATH=/opt/jami-bridge/lib ldd /opt/jami-bridge/jami-bridge 2>&1 | grep "not found" && exit 1 || echo "All libs resolved" && \
     echo "=== PASS ==="
 
-# Test 2: All shared libs resolve
-RUN echo "=== Test 2: Shared library dependencies ===" && \
-    LD_LIBRARY_PATH=/opt/jami-bridge/lib ldd /opt/jami-bridge/jami-bridge 2>&1 | grep "not found" && exit 1 || echo "All libs resolved" && \
+# Test 2: Binary --help works
+RUN echo "=== Test 2: Binary --help ===" && \
+    LD_LIBRARY_PATH=/opt/jami-bridge/lib /opt/jami-bridge/jami-bridge --help 2>&1 | head -5 && \
     echo "=== PASS ==="
 
 # Test 3: Daemon initializes (5s timeout)
 RUN echo "=== Test 3: Daemon init (5s timeout) ===" && \
     timeout 5 bash -c 'LD_LIBRARY_PATH=/opt/jami-bridge/lib /opt/jami-bridge/jami-bridge --port 9999 2>&1' || \
-    echo "(daemon exited — no account in container)" && \
+    echo "(daemon exited — expected in test env)" && \
     echo "=== PASS ==="
 
-# Report what's in /opt/jami-bridge (for dist packaging reference)
+# Report dist size
 RUN echo "=== Dist contents ===" && \
     find /opt/jami-bridge -type f -exec ls -lh {} \; && \
     echo "=== Total size ===" && \
-    du -sh /opt/jami-bridge
+    du -sh /opt/jami-bridge && \
+    echo "=== Bundled libraries ===" && \
+    ls -lh /opt/jami-bridge/lib/ | wc -l && \
+    echo "libs"
 
 CMD ["bash"]

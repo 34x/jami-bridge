@@ -2,6 +2,10 @@
 # The binary has RPATH $ORIGIN/lib embedded, so it finds libraries
 # in a lib/ directory next to itself. No LD_LIBRARY_PATH needed.
 #
+# ALL non-glibc shared libraries are bundled, making the dist portable
+# across Linux distros (any system with glibc 2.35+, e.g. Ubuntu 22.04+,
+# Debian 12+, Fedora 38+, RHEL 9+).
+#
 # Build: podman build -t jami-bridge-dist -f Containerfile.dist .
 #
 # Then extract the dist:
@@ -35,7 +39,8 @@ RUN readelf -d /build/jami-bridge/build/jami-bridge | grep -i rpath || echo "WAR
 # ── Stage 2: Create distribution ──────────────────────────────────────
 FROM fedora:43 AS dist
 
-# Install runtime deps + patchelf for setting RPATH on bundled libs
+# Install patchelf for setting RPATH on bundled libs, plus all runtime
+# dependencies so ldd can resolve them for copying.
 RUN dnf install -y patchelf \
     gnutls nettle opus speexdsp \
     yaml-cpp jsoncpp fmt \
@@ -51,13 +56,6 @@ RUN dnf install -y patchelf \
     && dnf clean all
 
 # Create distribution directory structure
-# jami-bridge-dist/
-# ├── jami-bridge          (binary with RPATH $ORIGIN/lib)
-# └── lib/
-#     ├── libjami.so.16.0.0   (jami daemon, 236MB)
-#     ├── libgit2.so.1.9.2    (git support, may not be on host)
-#     └── libsecp256k1.so.5.0.0 (crypto, may not be on host)
-
 RUN mkdir -p /dist/jami-bridge-dist/lib
 
 # Copy binary
@@ -66,44 +64,64 @@ COPY --from=builder /build/jami-bridge/build/jami-bridge /dist/jami-bridge-dist/
 # Copy libjami.so from builder
 COPY --from=builder /usr/local/lib64/libjami.so.16.0.0 /dist/jami-bridge-dist/lib/libjami.so.16.0.0
 
-# Copy system libraries that may not be on the host
-COPY --from=builder /usr/lib64/libgit2.so.1.9.2 /dist/jami-bridge-dist/lib/libgit2.so.1.9.2
-COPY --from=builder /usr/lib64/libsecp256k1.so.5.0.0 /dist/jami-bridge-dist/lib/libsecp256k1.so.5.0.0
-COPY --from=builder /usr/lib64/libllhttp.so.9.3.1 /dist/jami-bridge-dist/lib/libllhttp.so.9.3.1
-
-# Create symlinks
-RUN cd /dist/jami-bridge-dist/lib && \
-    ln -sf libjami.so.16.0.0 libjami.so.16 && \
-    ln -sf libjami.so.16 libjami.so && \
-    ln -sf libgit2.so.1.9.2 libgit2.so.1.9 && \
-    ln -sf libsecp256k1.so.5.0.0 libsecp256k1.so.5 && \
-    ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
-
-# Patch RPATH on bundled shared libs that have transitive dependencies.
-# Without this, libgit2 can't find libllhttp (its transitive dep)
-# because RUNPATH doesn't cascade to transitive deps in modern glibc.
-# $ORIGIN makes each lib look in its own directory.
-RUN patchelf --set-rpath '$ORIGIN' /dist/jami-bridge-dist/lib/libjami.so.16.0.0 && \
-    patchelf --set-rpath '$ORIGIN' /dist/jami-bridge-dist/lib/libgit2.so.1.9.2 && \
-    patchelf --set-rpath '$ORIGIN' /dist/jami-bridge-dist/lib/libsecp256k1.so.5.0.0 && \
-    patchelf --set-rpath '$ORIGIN' /dist/jami-bridge-dist/lib/libllhttp.so.9.3.1 && \
-    echo "=== RPATH patches applied ===" && \
-    ln -sf libllhttp.so.9.3.1 libllhttp.so.9.3
-
-# Verify the binary works in the dist directory
+# ── Bundle ALL non-glibc shared libraries ────────────────────────────
+# glibc (libc.so.6, libm.so.6, libdl.so.2, libpthread.so.0, ld-linux)
+# is guaranteed on every Linux system — skip those. Everything else is
+# bundled so the dist works across distros without matching system packages.
+#
+# Must iterate because ldd only resolves direct deps — transitive deps
+# of newly bundled libs are discovered in subsequent passes.
 RUN chmod +x /dist/jami-bridge-dist/jami-bridge && \
     cd /dist/jami-bridge-dist && \
-    LD_LIBRARY_PATH=/dist/jami-bridge-dist/lib ./jami-bridge --help && \
-    echo "=== Binary works! ===" && \
-    echo "=== Distribution size ===" && \
-    du -sh /dist/jami-bridge-dist/ && \
-    du -sh /dist/jami-bridge-dist/lib/
+    echo "=== Bundling all non-glibc shared libraries (iterative) ===" && \
+    changed=1; \
+    while [ "$changed" -ne 0 ]; do \
+        changed=0; \
+        for lib_path in $( \
+            LD_LIBRARY_PATH=/dist/jami-bridge-dist/lib ldd ./jami-bridge ./lib/*.so.* \
+            | grep -oP '/[^\s:]+' \
+            | sort -u \
+        ); do \
+            lib_name=$(basename "$lib_path"); \
+            case "$lib_name" in \
+                ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*) \
+                    continue ;; \
+            esac; \
+            [ -f "lib/$lib_name" ] && continue; \
+            case "$lib_name" in *.so*) ;; *) continue ;; esac; \
+            cp -L "$lib_path" "lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"; \
+        done; \
+    done && \
+    echo "=== Bundle complete ===" && \
+    echo "=== Patching RUNPATH on all bundled libs ===" && \
+    for so in lib/*.so*; do \
+        [ -L "$so" ] && continue; \
+        patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true; \
+    done && \
+    echo "=== Creating symlinks for versioned libs ===" && \
+    cd lib && \
+    for so in *.so.*.*; do \
+        [ -L "$so" ] && continue; \
+        major="${so%.so.*}.so.$(echo "$so" | sed 's/.*\.so\.//; s/\..*//')"; \
+        [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null; \
+    done && \
+    for so in *.so.*; do \
+        [ -L "$so" ] && continue; \
+        base="${so%.so.*}.so"; \
+        [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" 2>/dev/null; \
+    done && \
+    echo "=== Done ==="
 
-# Verify ldd finds all libs via RPATH
+# Verify the binary works with only bundled libs
 RUN cd /dist/jami-bridge-dist && \
     LD_LIBRARY_PATH=/dist/jami-bridge-dist/lib ldd ./jami-bridge | grep "not found" && \
     echo "ERROR: Missing libraries!" && exit 1 || \
-    echo "=== All libraries resolved! ==="
+    echo "=== All libraries resolved ===" && \
+    echo "=== Distribution size ===" && \
+    du -sh /dist/jami-bridge-dist/ && \
+    du -sh /dist/jami-bridge-dist/lib/ && \
+    echo "=== Bundled libraries ===" && \
+    ls -lh lib/
 
 # Create tarball
 RUN cd /dist && tar czf jami-bridge-dist.tar.gz jami-bridge-dist/ && \

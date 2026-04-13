@@ -1,24 +1,15 @@
 # Minimal runtime image for jami-bridge development.
-# Contains only the system libraries needed by libjami.so and the SDK.
-# The SDK binary and bundled libs are mounted at runtime from the host.
+# Since the dist bundles all non-glibc libs, this image only needs glibc 2.35+.
+# Used by './build.sh dev-run' to test the dev binary in a clean environment.
 #
-# This image is built once and reused by './build.sh dev-run'.
-# Size: ~200MB (vs 4GB for the dev image, 765MB for the production image).
+# The SDK binary and bundled libs are mounted at runtime from the host.
+# This image is built once and reused — no rebuild needed for code changes.
 
 FROM fedora:43
 
+# Only the most basic packages (glibc is already in the base image)
 RUN dnf install -y \
-    gnutls nettle opus speexdsp \
-    yaml-cpp jsoncpp fmt \
-    libuuid libargon2 libarchive \
-    openssl-libs \
-    alsa-lib \
-    libgit2 libsecp256k1 \
-    libva libvdpau mesa-libGL \
-    libX11 libXext libXfixes \
-    pipewire-libs pulseaudio-libs \
-    dbus-libs msgpack sqlite-libs \
-    pcre2 expat \
+    glibc-minimal \
     && dnf clean all
 
 # Create non-root user for running the SDK

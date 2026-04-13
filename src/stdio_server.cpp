@@ -27,6 +27,8 @@
 ///   shutdown                         — shut down
 ///   listAccounts                     — list account IDs
 ///   createAccount    {alias,password} — create account
+///   importAccount    {path,password?} — import account from archive file
+///   exportAccount    {accountId,path,password?} — export account to archive file
 ///   getAccountDetails {accountId}    — account details
 ///   setAccountDetails {accountId,details} — update account details (alias, etc.)
 ///   updateProfile     {accountId,displayName?,avatar?} — push display name/avatar to contacts
@@ -226,6 +228,27 @@ std::string StdioServer::handle_request(const std::string& json_line) {
         std::string password = params.value("password", "");
         auto id = client_.create_account(alias, password);
         return make_result({{"accountId", id}});
+    }
+
+    if (method == "importAccount") {
+        std::string path = params.at("path");
+        std::string password = params.value("password", "");
+        auto id = client_.import_account(path, password);
+        if (id.empty()) {
+            return make_error(-32603, "Failed to import account from: " + path);
+        }
+        return make_result({{"accountId", id}});
+    }
+
+    if (method == "exportAccount") {
+        std::string account_id = params.at("accountId");
+        std::string path = params.at("path");
+        std::string password = params.value("password", "");
+        bool ok = client_.export_account(account_id, path, password);
+        if (!ok) {
+            return make_error(-32603, "Failed to export account to: " + path);
+        }
+        return make_result({{"exported", true}, {"path", path}});
     }
 
     if (method == "getAccountDetails") {

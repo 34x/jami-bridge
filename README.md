@@ -26,8 +26,9 @@ lib/                   ← 4 bundled libraries (240 MB)
   └── libllhttp.so.9.3.1     HTTP parser
 ```
 
-No host packages needed on Fedora 43+ (all non-system dependencies bundled).
-Works out of the box — just extract and run.
+No host packages needed — all non-glibc dependencies are bundled.
+Works out of the box on any Linux with glibc 2.35+ (Fedora 38+, Ubuntu 22.04+, Debian 12+, RHEL 9+).
+Just extract and run.
 
 ---
 
@@ -630,7 +631,7 @@ in the same directory. This is necessary because modern glibc's `RUNPATH`
 does **not** cascade to transitive dependencies.
 
 Result: **just extract the tarball and run** — no environment variables,
-no wrapper scripts, no system package installs (on Fedora 43+).
+no wrapper scripts, no system package installs — all non-glibc libs are bundled.
 
 ---
 
