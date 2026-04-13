@@ -127,15 +127,30 @@ static void print_bot_identity(jami::Client& client, const std::string& account_
 static std::string resolve_account(jami::Client& client, const jami::Config& cfg) {
     auto accounts = client.list_accounts();
 
-    // Explicit account ID
+    // Explicit account ID or URI
     if (!cfg.account.empty() && cfg.account != "new"
         && cfg.account.find("archive://") != 0
         && cfg.account[0] != '/') {
-        // It's an account ID — verify it exists
+        // Try matching by account ID (hex string)
         for (const auto& id : accounts) {
             if (id == cfg.account) {
                 std::cerr << "[jami-bridge] Using account: " << cfg.account << std::endl;
                 return cfg.account;
+            }
+        }
+        // Try matching by Jami URI (e.g. "jami://abc123" or just the hash)
+        // Strip "jami://" prefix if present
+        std::string uri = cfg.account;
+        if (uri.find("jami://") == 0) uri = uri.substr(7);
+        for (const auto& id : accounts) {
+            auto details = client.account_details(id);
+            std::string username = details.count("Account.username") ? details["Account.username"] : "";
+            // Match against the full URI or the hash portion
+            if (username == cfg.account || username == uri
+                || username.find(uri) != std::string::npos) {
+                std::cerr << "[jami-bridge] Using account: " << id
+                          << " (matched by URI: " << cfg.account << ")" << std::endl;
+                return id;
             }
         }
         std::cerr << "[jami-bridge] Error: Account not found: " << cfg.account << std::endl;
@@ -711,6 +726,127 @@ int main(int argc, char* argv[]) {
         if (!resolved_account_id.empty()) {
             print_bot_identity(client, resolved_account_id);
         }
+    }
+
+    // ── Install account filter ─────────────────────────────────────────
+    // When --account resolves to a specific account, only emit events for
+    // that account. This prevents cross-account event leakage when the
+    // daemon has multiple accounts loaded (e.g. data directory has accounts
+    // A and B, but the client only cares about A).
+    //
+    // Without this filter, if the daemon loads accounts A and B, a client
+    // connected to account A would also see messages for account B — a
+    // security and correctness bug.
+    //
+    // If no account is resolved (auto-detect in multi-account setup),
+    // all events are emitted (backward compatible).
+
+    if (!resolved_account_id.empty()) {
+        std::string filter_account = resolved_account_id;
+
+        // Wrap on_message_received
+        auto orig_msg_cb = std::move(events.on_message_received);
+        events.on_message_received = [filter_account, orig_msg_cb](const jami::Message& msg) {
+            if (msg.account_id == filter_account) {
+                if (orig_msg_cb) orig_msg_cb(msg);
+            }
+        };
+
+        // Wrap on_conversation_ready
+        auto orig_conv_ready_cb = std::move(events.on_conversation_ready);
+        events.on_conversation_ready = [filter_account, orig_conv_ready_cb](
+                const std::string& account_id, const std::string& conv_id) {
+            if (account_id == filter_account) {
+                if (orig_conv_ready_cb) orig_conv_ready_cb(account_id, conv_id);
+            }
+        };
+
+        // Wrap on_conversation_member_event
+        auto orig_member_cb = std::move(events.on_conversation_member_event);
+        events.on_conversation_member_event = [filter_account, orig_member_cb](
+                const std::string& account_id, const std::string& conv_id,
+                const std::string& member_uri, int event) {
+            if (account_id == filter_account) {
+                if (orig_member_cb) orig_member_cb(account_id, conv_id, member_uri, event);
+            }
+        };
+
+        // Wrap on_conversation_request_received
+        auto orig_conv_req_cb = std::move(events.on_conversation_request_received);
+        events.on_conversation_request_received = [filter_account, orig_conv_req_cb](
+                const std::string& account_id, const std::string& conv_id,
+                const std::map<std::string, std::string>& metadatas) {
+            if (account_id == filter_account) {
+                if (orig_conv_req_cb) orig_conv_req_cb(account_id, conv_id, metadatas);
+            }
+        };
+
+        // Wrap on_trust_request_received
+        auto orig_trust_cb = std::move(events.on_trust_request_received);
+        events.on_trust_request_received = [filter_account, orig_trust_cb](
+                const std::string& account_id, const std::string& from_uri,
+                const std::string& conv_id) {
+            if (account_id == filter_account) {
+                if (orig_trust_cb) orig_trust_cb(account_id, from_uri, conv_id);
+            }
+        };
+
+        // Wrap on_registration_changed
+        auto orig_reg_cb = std::move(events.on_registration_changed);
+        events.on_registration_changed = [filter_account, orig_reg_cb](
+                const std::string& account_id, const std::string& state,
+                int code, const std::string& detail) {
+            if (account_id == filter_account) {
+                if (orig_reg_cb) orig_reg_cb(account_id, state, code, detail);
+            }
+        };
+
+        // Wrap on_message_status_changed
+        auto orig_status_cb = std::move(events.on_message_status_changed);
+        events.on_message_status_changed = [filter_account, orig_status_cb](
+                const std::string& account_id, const std::string& conversation_id,
+                const std::string& peer, const std::string& message_id, int state) {
+            if (account_id == filter_account) {
+                if (orig_status_cb) orig_status_cb(account_id, conversation_id, peer, message_id, state);
+            }
+        };
+
+        // Wrap on_name_registration_ended
+        auto orig_name_reg_cb = std::move(events.on_name_registration_ended);
+        events.on_name_registration_ended = [filter_account, orig_name_reg_cb](
+                const std::string& account_id, int state, const std::string& name) {
+            if (account_id == filter_account) {
+                if (orig_name_reg_cb) orig_name_reg_cb(account_id, state, name);
+            }
+        };
+
+        // Wrap on_messages_loaded (sync message loading — pass-through,
+        // but filter for consistency)
+        auto orig_loaded_cb = std::move(events.on_messages_loaded);
+        events.on_messages_loaded = [filter_account, orig_loaded_cb](
+                uint32_t req_id, const std::string& account_id,
+                const std::string& conv_id,
+                const std::vector<libjami::SwarmMessage>& messages) {
+            if (account_id == filter_account) {
+                if (orig_loaded_cb) orig_loaded_cb(req_id, account_id, conv_id, messages);
+            }
+        };
+
+        // Wrap on_data_transfer_event
+        auto orig_transfer_cb = std::move(events.on_data_transfer_event);
+        events.on_data_transfer_event = [filter_account, orig_transfer_cb](
+                const jami::FileTransfer& transfer) {
+            if (transfer.account_id == filter_account) {
+                if (orig_transfer_cb) orig_transfer_cb(transfer);
+            }
+        };
+
+        // Re-register callbacks with the filtered versions
+        client.update_callbacks(events);
+        std::cerr << "[jami-bridge] Account filter: only emitting events for "
+                  << resolved_account_id.substr(0, 8) << "..." << std::endl;
+    } else {
+        std::cerr << "[jami-bridge] No account filter: emitting events for ALL accounts" << std::endl;
     }
 
     // ── Run in requested mode ──────────────────────────────────────────
