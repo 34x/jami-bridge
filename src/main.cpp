@@ -124,102 +124,188 @@ static void print_bot_identity(jami::Client& client, const std::string& account_
 /// Resolve which account to use based on config.
 /// Returns the account ID to use.
 /// May create or import an account if configured.
-static std::string resolve_account(jami::Client& client, const jami::Config& cfg) {
+/// Resolve a single account when --account SPEC is given.
+/// Returns the account ID, or empty string on error.
+static std::string resolve_single_account(jami::Client& client, const jami::Config& cfg) {
     auto accounts = client.list_accounts();
 
-    // Explicit account ID or URI
-    if (!cfg.account.empty() && cfg.account != "new"
-        && cfg.account.find("archive://") != 0
-        && cfg.account[0] != '/') {
-        // Try matching by account ID (hex string)
-        for (const auto& id : accounts) {
-            if (id == cfg.account) {
-                jami::log("Using account: ", cfg.account);
-                return cfg.account;
-            }
+    if (cfg.account.empty()) return "";  // shouldn't be called with empty spec
+
+    // Try matching by account ID (hex string)
+    for (const auto& id : accounts) {
+        if (id == cfg.account) {
+            jami::log("Using account: ", cfg.account);
+            return cfg.account;
         }
-        // Try matching by Jami URI (e.g. "jami://abc123" or just the hash)
-        // Strip "jami://" prefix if present
-        std::string uri = cfg.account;
-        if (uri.find("jami://") == 0) uri = uri.substr(7);
-        for (const auto& id : accounts) {
-            auto details = client.account_details(id);
-            std::string username = details.count("Account.username") ? details["Account.username"] : "";
-            // Match against the full URI or the hash portion
-            if (username == cfg.account || username == uri
-                || username.find(uri) != std::string::npos) {
-                jami::log("Using account: ", id, " (matched by URI: ", cfg.account, ")");
-                return id;
-            }
-        }
-        jami::log("Error: Account not found: ", cfg.account);
-        jami::log("Available accounts:");
-        for (const auto& id : accounts) {
-            auto details = client.account_details(id);
-            jami::log("  ", id,
-                      " (alias: ", (details.count("Account.alias") ? details["Account.alias"] : ""), ")");
-        }
-        return "";
     }
+    // Try matching by Jami URI (e.g. "jami://abc123" or just the hash)
+    // Strip "jami://" prefix if present
+    std::string uri = cfg.account;
+    if (uri.find("jami://") == 0) uri = uri.substr(7);
+    for (const auto& id : accounts) {
+        auto details = client.account_details(id);
+        std::string username = details.count("Account.username") ? details["Account.username"] : "";
+        // Match against the full URI or the hash portion
+        if (username == cfg.account || username == uri
+            || username.find(uri) != std::string::npos) {
+            jami::log("Using account: ", id, " (matched by URI: ", cfg.account, ")");
+            return id;
+        }
+    }
+    jami::log("Error: Account not found: ", cfg.account);
+    jami::log("Available accounts:");
+    for (const auto& id : accounts) {
+        auto details = client.account_details(id);
+        jami::log("  ", id,
+                  " (alias: ", (details.count("Account.alias") ? details["Account.alias"] : ""), ")");
+    }
+    return "";
+}
 
-    // Import account from archive (path exists)
-    if (!cfg.account.empty() && (cfg.account.find("archive://") == 0 || cfg.account[0] == '/')) {
-        std::string path = cfg.account.find("archive://") == 0
-            ? cfg.account.substr(10)
-            : cfg.account;
+/// Resolve account(s) for the bridge.
+///
+/// Returns a list of account IDs to serve.
+/// - --account SPEC (hex/URI):  returns [that account]
+/// - --account archive:///path:  returns [imported account]
+/// - --account /path.gz:  returns [imported/created account]
+/// - --account new:  returns [new account]
+/// - (empty --account, single account):  returns [that account]
+/// - (empty --account, multiple accounts):  returns ALL accounts
+/// - (empty --account, no accounts):  creates one, returns [it]
+static std::vector<std::string> resolve_accounts(jami::Client& client, const jami::Config& cfg) {
+    auto accounts = client.list_accounts();
 
-        if (file_exists(path)) {
-            // Existing archive — import it
-            jami::log("Importing account from: ", path);
-            std::string account_id = client.import_account(path, cfg.account_password);
-            if (account_id.empty()) {
-                jami::log("Error: Failed to import account");
-                return "";
+    // ── Explicit --account SPEC ────────────────────────────────────────
+    if (!cfg.account.empty()) {
+        // archive:///path or /path.gz
+        if (cfg.account.find("archive://") == 0 || cfg.account[0] == '/') {
+            std::string path = cfg.account.find("archive://") == 0
+                ? cfg.account.substr(10)
+                : cfg.account;
+
+            if (file_exists(path)) {
+                // ── Check if the account is already loaded ──────────────
+                // Importing an archive that's already in the daemon creates
+                // a duplicate. Match by exported URI to reuse existing.
+                //
+                // We peek into the archive to get the Jami URI, then
+                // check loaded accounts for a match. The archive is a
+                // gzip file; the daemon can tell us the details after a
+                // trial import, but that has side effects. Instead, we
+                // import and then check if we created a duplicate — if so,
+                // remove the new one and return the existing.
+                //
+                // Simpler approach: import, then check if there's now
+                // more than one account with the same URI. If the import
+                // created a duplicate, remove it and return the original.
+                jami::log("Importing account from: ", path);
+                std::string new_id = client.import_account(path, cfg.account_password);
+                if (new_id.empty()) {
+                    jami::log("Error: Failed to import account");
+                    return {};
+                }
+
+                // Check if an existing (non-new) account has the same URI
+                auto new_details = client.account_details(new_id);
+                std::string new_uri = new_details.count("Account.username")
+                    ? new_details["Account.username"] : "";
+                // URI may not be available immediately after import
+                if (new_uri.empty()) {
+                    auto vdetails = client.account_volatile_details(new_id);
+                    new_uri = vdetails.count("Account.username")
+                        ? vdetails["Account.username"] : "";
+                }
+
+                // Wait briefly for URI if not yet available
+                if (new_uri.empty()) {
+                    new_uri = wait_for_jami_uri(client, new_id, 5000);
+                }
+
+                // Look for duplicate: another loaded account with same URI
+                std::string existing_id;
+                for (const auto& id : accounts) {
+                    if (id == new_id) continue;  // skip the one we just imported
+                    auto details = client.account_details(id);
+                    std::string uri = details.count("Account.username")
+                        ? details["Account.username"] : "";
+                    if (uri.empty()) {
+                        auto vd = client.account_volatile_details(id);
+                        uri = vd.count("Account.username") ? vd["Account.username"] : "";
+                    }
+                    if (!uri.empty() && uri == new_uri) {
+                        existing_id = id;
+                        break;
+                    }
+                }
+
+                if (!existing_id.empty()) {
+                    // The imported account is a duplicate — remove it, use the original
+                    jami::log("Account already loaded as: ", existing_id,
+                             " — removing duplicate: ", new_id);
+                    client.remove_account(new_id);
+                    return {existing_id};
+                }
+
+                jami::log("Imported account: ", new_id);
+                return {new_id};
+            } else {
+                jami::log("Creating new account (archive will be saved to: ", path, ")");
+                std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
+                jami::log("Created account: ", account_id);
+
+                // Wait for the account to be ready before exporting
+                std::this_thread::sleep_for(std::chrono::seconds(3));
+
+                bool exported = client.export_account(account_id, path, cfg.account_password);
+                if (exported) {
+                    jami::log("Account exported to: ", path);
+                } else {
+                    jami::log("Warning: Failed to export account to ", path);
+                }
+                return {account_id};
             }
-            jami::log("Imported account: ", account_id);
-            return account_id;
-        } else {
-            // Path doesn't exist — create new account and export it
-            jami::log("Creating new account (archive will be saved to: ", path, ")");
+        }
+
+        // "new" — create a fresh account
+        if (cfg.account == "new") {
+            jami::log("Creating new account (alias: ", cfg.account_alias, ")...");
             std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
             jami::log("Created account: ", account_id);
-
-            // Wait for the account to be ready before exporting
-            std::this_thread::sleep_for(std::chrono::seconds(3));
-
-            bool exported = client.export_account(account_id, path, cfg.account_password);
-            if (exported) {
-                jami::log("Account exported to: ", path);
-            } else {
-                jami::log("Warning: Failed to export account to ", path);
-            }
-            return account_id;
+            return {account_id};
         }
+
+        // Hex ID or Jami URI — resolve to a single account
+        std::string id = resolve_single_account(client, cfg);
+        if (id.empty()) return {};
+        return {id};
     }
 
-    // Create new account explicitly requested
-    if (cfg.account == "new") {
-        jami::log("Creating new account (alias: ", cfg.account_alias, ")...");
+    // ── No --account specified — auto-detect or create ─────────────────
+    if (accounts.empty()) {
+        jami::log("No accounts found. Creating new account (alias: ", cfg.account_alias, ")...");
         std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
         jami::log("Created account: ", account_id);
-        return account_id;
+        return {account_id};
     }
 
-    // Auto-detect: use first existing account, or create new one
-    if (!accounts.empty()) {
+    if (accounts.size() == 1) {
         std::string id = accounts[0];
         auto details = client.account_details(id);
         std::string alias = details.count("Account.alias") ? details["Account.alias"] : "";
         std::string username = details.count("Account.username") ? details["Account.username"] : "";
         jami::log("Auto-detected account: ", id, " (alias: ", alias, ", username: ", username, ")");
-        return id;
+        return {id};
     }
 
-    // No accounts exist — create one
-    jami::log("No accounts found. Creating new account (alias: ", cfg.account_alias, ")...");
-    std::string account_id = client.create_account(cfg.account_alias, cfg.account_password);
-    jami::log("Created account: ", account_id);
-    return account_id;
+    // Multiple accounts — serve all of them
+    jami::log("Auto-detected ", accounts.size(), " accounts — serving all:");
+    for (const auto& id : accounts) {
+        auto details = client.account_details(id);
+        std::string alias = details.count("Account.alias") ? details["Account.alias"] : "";
+        std::string username = details.count("Account.username") ? details["Account.username"] : "";
+        jami::log("  ", id, " (alias: ", alias, ", username: ", username, ")");
+    }
+    return accounts;
 }
 
 /// Run a one-shot CLI command, print result as JSON, and return exit code.
@@ -227,10 +313,11 @@ static int run_cli(jami::Client& client, const jami::Config& cfg) {
     // Resolve account
     std::string account_id;
     if (cfg.cli_command != "list-accounts" && cfg.cli_command != "stats") {
-        account_id = resolve_account(client, cfg);
-        if (account_id.empty()) {
+        auto resolved = resolve_accounts(client, cfg);
+        if (resolved.empty()) {
             return 1;
         }
+        account_id = resolved[0];  // CLI mode uses first account
     }
 
     if (cfg.cli_command == "list-accounts") {
@@ -681,36 +768,32 @@ int main(int argc, char* argv[]) {
     // Store the resolved account ID so the server can use it.
     // The resolve happens lazily when an API call needs it,
     // but for HTTP/STDIO modes we resolve early for the log message.
-    std::string resolved_account_id;
+    std::vector<std::string> resolved_accounts;
     if (cfg.mode != jami::Config::Mode::CLI) {
         // Give the daemon time to load accounts
         std::this_thread::sleep_for(std::chrono::seconds(2));
-        resolved_account_id = resolve_account(client, cfg);
-        if (resolved_account_id.empty() && !cfg.account.empty() && cfg.account != "new") {
+        resolved_accounts = resolve_accounts(client, cfg);
+        if (resolved_accounts.empty() && !cfg.account.empty() && cfg.account != "new") {
             jami::log("Warning: Could not resolve configured account");
         }
 
         // Display the bot's Jami identity for easy invites
-        if (!resolved_account_id.empty()) {
-            print_bot_identity(client, resolved_account_id);
+        for (const auto& aid : resolved_accounts) {
+            print_bot_identity(client, aid);
         }
     }
 
     // ── Install account filter ─────────────────────────────────────────
-    // When --account resolves to a specific account, only emit events for
+    // When --account resolves to a single account, only emit events for
     // that account. This prevents cross-account event leakage when the
     // daemon has multiple accounts loaded (e.g. data directory has accounts
     // A and B, but the client only cares about A).
     //
-    // Without this filter, if the daemon loads accounts A and B, a client
-    // connected to account A would also see messages for account B — a
-    // security and correctness bug.
-    //
-    // If no account is resolved (auto-detect in multi-account setup),
-    // all events are emitted (backward compatible).
+    // When serving multiple accounts (no --account specified, multiple
+    // accounts exist), all events are emitted — no filter needed.
 
-    if (!resolved_account_id.empty()) {
-        std::string filter_account = resolved_account_id;
+    if (resolved_accounts.size() == 1) {
+        std::string filter_account = resolved_accounts[0];
 
         // Wrap on_message_received
         auto orig_msg_cb = std::move(events.on_message_received);
@@ -811,9 +894,11 @@ int main(int argc, char* argv[]) {
 
         // Re-register callbacks with the filtered versions
         client.update_callbacks(events);
-        jami::log("Account filter: only emitting events for ", resolved_account_id.substr(0, 8), "...");
+        jami::log("Account filter: only emitting events for ", filter_account.substr(0, 8), "...");
+    } else if (resolved_accounts.empty()) {
+        jami::log("No account filter: no accounts resolved");
     } else {
-        jami::log("No account filter: emitting events for ALL accounts");
+        jami::log("No account filter: emitting events for ALL ", resolved_accounts.size(), " accounts");
     }
 
     // ── Run in requested mode ──────────────────────────────────────────
