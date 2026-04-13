@@ -66,11 +66,14 @@ void Config::print_usage(const char* prog) const {
               << "\n"
               << "Data paths (override daemon's XDG directories):\n"
               << "  --data-dir DIR       Data directory (default: $XDG_DATA_HOME/jami\n"
-              << "                                               or ~/.local/share/jami)\n"
+              << "                                               or ~/.local/share/jami\n"
+              << "                                               or ~/Library/Application Support/jami on macOS)\n"
               << "  --config-dir DIR     Config directory (default: $XDG_CONFIG_HOME/jami\n"
-              << "                                                or ~/.config/jami)\n"
+              << "                                                or ~/.config/jami\n"
+              << "                                                or ~/Library/Preferences/jami on macOS)\n"
               << "  --cache-dir DIR      Cache directory (default: $XDG_CACHE_HOME/jami\n"
-              << "                                               or ~/.cache/jami)\n"
+              << "                                               or ~/.cache/jami\n"
+              << "                                               or ~/Library/Caches/jami on macOS)\n"
               << "\n"
               << "STDIO options:\n"
               << "  --stdio              Run in JSON-RPC mode (read stdin, write stdout)\n"
@@ -313,6 +316,30 @@ void Config::apply_daemon_paths() const {
     // We set them before libjami::init() so the daemon picks them up.
     // Note: these are the BASE directories (without /jami suffix),
     // because the daemon itself appends "jami" (the PACKAGE name).
+
+    // On macOS, set sensible XDG defaults if none are set — the Jami
+    // daemon doesn't know about macOS conventions, so we map them:
+    //   ~/Library/Application Support  → XDG_DATA_HOME
+    //   ~/Library/Preferences          → XDG_CONFIG_HOME
+    //   ~/Library/Caches               → XDG_CACHE_HOME
+    // This way the daemon's XDG logic still works, but paths make sense on macOS.
+#ifdef __APPLE__
+    if (!getenv("XDG_DATA_HOME")) {
+        std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
+        std::string xdg_data = home + "/Library/Application Support";
+        setenv("XDG_DATA_HOME", xdg_data.c_str(), 0);  // don't overwrite
+    }
+    if (!getenv("XDG_CONFIG_HOME")) {
+        std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
+        std::string xdg_config = home + "/Library/Preferences";
+        setenv("XDG_CONFIG_HOME", xdg_config.c_str(), 0);
+    }
+    if (!getenv("XDG_CACHE_HOME")) {
+        std::string home = getenv("HOME") ? getenv("HOME") : "/tmp";
+        std::string xdg_cache = home + "/Library/Caches";
+        setenv("XDG_CACHE_HOME", xdg_cache.c_str(), 0);
+    }
+#endif
 
     if (!data_dir.empty()) {
         setenv("XDG_DATA_HOME", data_dir.c_str(), 1);

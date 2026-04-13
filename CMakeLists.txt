@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── Dependencies ──────────────────────────────────────────────────────
 
-# Jami daemon (libjami-core) — must be built with -Dinterfaces=library
+# Jami daemon (libjami) — must be built with -Dinterfaces=library
 # Set JAMI_INCLUDE_DIR and JAMI_LIBRARY via cmake or environment.
 #
 # On Linux with jami-daemon installed from package:
@@ -15,7 +15,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 #
 # When building from source (recommended):
 #   Build jami-daemon with: meson setup build -Dinterfaces=library
-#   This produces libjami.so with libjami:: symbols exported.
+#   This produces libjami.so/libjami.dylib with libjami:: symbols.
+#
+# On macOS (Homebrew):
+#   JAMI_INCLUDE_DIR=/usr/local/include/jami
+#   JAMI_LIBRARY=/usr/local/lib/libjami.dylib
 #
 # On Windows:
 #   Build jami-daemon with Visual Studio + vcpkg dependencies
@@ -28,17 +32,30 @@ find_path(JAMI_INCLUDE_DIR
         $ENV{JAMI_INCLUDE_DIR}
         /usr/include/jami
         /usr/local/include/jami
+        /opt/homebrew/include/jami
 )
 
-find_library(JAMI_LIBRARY
-    NAMES jami jami-core
-    HINTS
-        ${CMAKE_SOURCE_DIR}/../daemon/build/src
-        $ENV{JAMI_LIBRARY_DIR}
-        /usr/lib64
-        /usr/lib
-        /usr/local/lib
-)
+# On macOS, library extension is .dylib; on Linux it's .so
+if(APPLE)
+    find_library(JAMI_LIBRARY
+        NAMES jami jami-core
+        HINTS
+            ${CMAKE_SOURCE_DIR}/../daemon/build/src
+            $ENV{JAMI_LIBRARY_DIR}
+            /usr/local/lib
+            /opt/homebrew/lib
+    )
+else()
+    find_library(JAMI_LIBRARY
+        NAMES jami jami-core
+        HINTS
+            ${CMAKE_SOURCE_DIR}/../daemon/build/src
+            $ENV{JAMI_LIBRARY_DIR}
+            /usr/lib64
+            /usr/lib
+            /usr/local/lib
+    )
+endif()
 
 if(NOT JAMI_INCLUDE_DIR)
     message(FATAL_ERROR "Jami headers not found. Set JAMI_INCLUDE_DIR or build daemon from source.")
@@ -59,9 +76,14 @@ set(SOURCES
     src/server.cpp
     src/stdio_server.cpp
     src/api_docs.cpp
-    src/hook.cpp
     src/config.cpp
 )
+
+# Hook support uses POSIX fork/exec/pipes — only available on Unix-like systems.
+# On Windows, hook.cpp is excluded (use STDIO or HTTP mode instead).
+if(NOT WIN32)
+    list(APPEND SOURCES src/hook.cpp)
+endif()
 
 # ── Executable ──────────────────────────────────────────────────────────
 
@@ -73,15 +95,10 @@ target_include_directories(jami-bridge PRIVATE
     ${CMAKE_SOURCE_DIR}/vendor
 )
 
-target_link_libraries(jami-bridge PRIVATE
-    ${JAMI_LIBRARY}
-    pthread
-)
+target_link_libraries(jami-bridge PRIVATE ${JAMI_LIBRARY})
 
 # Platform-specific libraries and settings
 if(WIN32)
-    # On Windows, hook.cpp is not compiled (uses POSIX fork/exec)
-    list(REMOVE_ITEM SOURCES src/hook.cpp)
     target_link_libraries(jami-bridge PRIVATE ws2_32 crypt32)
     # Windows doesn't use RPATH
     set_target_properties(jami-bridge PROPERTIES
@@ -89,9 +106,18 @@ if(WIN32)
         INSTALL_RPATH ""
         BUILD_WITH_INSTALL_RPATH FALSE
     )
+elseif(APPLE)
+    # macOS: @loader_path is the equivalent of $ORIGIN for embedded library paths.
+    # macOS uses .dylib extension and install_name_tool instead of patchelf.
+    set_target_properties(jami-bridge PROPERTIES
+        BUILD_RPATH "@loader_path/../lib;@loader_path/lib"
+        INSTALL_RPATH "@loader_path/../lib;@loader_path/lib"
+        BUILD_WITH_INSTALL_RPATH TRUE
+    )
 else()
+    # Linux and other Unix-like systems
     target_link_libraries(jami-bridge PRIVATE pthread)
-    # Embed RPATH so the binary finds libs in $ORIGIN/lib/ next to itself.
+    # Embed RPATH so the binary finds libs in $ORIGIN/lib next to itself.
     # This eliminates the need for LD_LIBRARY_PATH or wrapper scripts.
     set_target_properties(jami-bridge PROPERTIES
         BUILD_RPATH "$ORIGIN/lib"

@@ -23,6 +23,14 @@
 
 set -e
 
+# Detect OS for platform-specific operations
+OS_NAME="$(uname -s)"
+case "$OS_NAME" in
+    Linux)  PLATFORM="linux" ;;
+    Darwin) PLATFORM="macos" ;;
+    *)      PLATFORM="unknown" ;;
+esac
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Build context for Containerfile.base: the bridge repo root (contains daemon/ submodule)
 # When jami-bridge is its own repo, daemon/ is a git submodule here.
@@ -35,7 +43,223 @@ DEV_CONTAINER="jami-bridge-dev"
 BRIDGE_SOURCE="$SCRIPT_DIR"  # jami-bridge/ directory on host
 BUILD_DIR="$BRIDGE_SOURCE/build"  # build/ on host, mounted into container
 
-# ── Base image (daemon from source) ────────────────────────────────────
+# ── Native build (no containers) ─────────────────────────────────────────
+#
+# For macOS or any host that has libjami installed. Builds directly on the
+# host — no Podman/Docker needed.
+#
+# Prerequisites:
+#   - cmake, make, C++17 compiler
+#   - libjami (built with -Dinterfaces=library) installed
+#   - Set JAMI_INCLUDE_DIR and JAMI_LIBRARY if not in standard paths
+#
+# Usage:
+#   ./build.sh native
+#   ./build.sh native-build              # cmake configure + make
+#   ./build.sh native-dist               # bundle libs into dist/
+
+native_build() {
+    local build_dir="$SCRIPT_DIR/build"
+    mkdir -p "$build_dir"
+
+    echo "=== Native build (PLATFORM=$PLATFORM) ==="
+
+    # Configure with cmake
+    echo "    Configuring..."
+    cd "$build_dir"
+    cmake .. "$@"
+
+    # Build
+    echo "    Compiling..."
+    make -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+
+    cd "$SCRIPT_DIR"
+
+    # Verify
+    if [ -f "$build_dir/jami-bridge" ]; then
+        local size
+        size=$(du -h "$build_dir/jami-bridge" | cut -f1)
+        echo "=== Build successful: $build_dir/jami-bridge ($size) ==="
+    else
+        echo "ERROR: Binary not found at $build_dir/jami-bridge"
+        exit 1
+    fi
+}
+
+native_dist() {
+    local build_dir="$SCRIPT_DIR/build"
+    local binary="$build_dir/jami-bridge"
+
+    if [ ! -f "$binary" ]; then
+        echo "ERROR: No binary found. Run './build.sh native' first."
+        exit 1
+    fi
+
+    local dist_dir="$SCRIPT_DIR/jami-bridge-dist-output/jami-bridge-dist"
+    mkdir -p "$dist_dir/lib"
+
+    echo "=== Creating native dist (PLATFORM=$PLATFORM) ==="
+
+    # Copy binary
+    cp "$binary" "$dist_dir/jami-bridge"
+    chmod +x "$dist_dir/jami-bridge"
+
+    if [ "$PLATFORM" = "macos" ]; then
+        native_dist_macos "$dist_dir"
+    else
+        native_dist_linux "$dist_dir"
+    fi
+
+    echo "=== Dist contents ==="
+    du -sh "$dist_dir"
+    ls -lh "$dist_dir/"
+    echo "=== Bundled libraries ==="
+    ls -lh "$dist_dir/lib/"
+
+    # Create tarball
+    cd "$SCRIPT_DIR/jami-bridge-dist-output"
+    tar czf jami-bridge-dist.tar.gz jami-bridge-dist/
+    echo "=== Tarball: $(ls -lh jami-bridge-dist.tar.gz | cut -f5) ==="
+    echo "=== Distribution created at: $SCRIPT_DIR/jami-bridge-dist-output/ ==="
+}
+
+native_dist_macos() {
+    local dist_dir="$1"
+    echo "=== Bundling libraries (macOS — otool/install_name_tool) ==="
+
+    # Find all linked libraries using otool
+    # macOS: otool -L shows linked libraries (equivalent of ldd)
+    # Bundle all except system libraries (/usr/lib, /System, @rpath system)
+    changed=1
+    while [ "$changed" -ne 0 ]; do
+        changed=0
+        for binary_path in $(
+            DYLD_LIBRARY_PATH="$dist_dir/lib" otool -L "$dist_dir/jami-bridge" "$dist_dir"/lib/*.dylib 2>/dev/null \
+            | grep -E '^\t/' \
+            | awk '{print $1}' \
+            | sort -u
+        ); do
+            lib_name=$(basename "$binary_path")
+            # Skip system libraries
+            case "$binary_path" in
+                /usr/lib/*|/System/*|@rpath/*|@loader_path/*|@executable_path/*)
+                    continue ;;
+            esac
+            # Skip if already bundled
+            [ -f "$dist_dir/lib/$lib_name" ] && continue
+            # Skip if not a .dylib or .so
+            case "$lib_name" in
+                *.dylib|*.so*) ;;
+                *) continue ;;
+            esac
+            # Resolve symlink and copy
+            cp -L "$binary_path" "$dist_dir/lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"
+        done
+    done
+
+    # Fix install names: change @rpath/libfoo.dylib → @loader_path/libfoo.dylib
+    # This makes each lib find its neighbors in the same lib/ directory.
+    echo "=== Patching install names ==="
+    for so in "$dist_dir/lib"/*.dylib "$dist_dir/lib"/*.so*; do
+        [ -e "$so" ] || continue
+        [ -L "$so" ] && continue
+        local lib_name
+        lib_name=$(basename "$so")
+        # Set the library's own ID to @loader_path/libfoo.dylib
+        install_name_tool -id "@loader_path/$lib_name" "$so" 2>/dev/null || true
+        # Change @rpath references to @loader_path
+        for ref in $(otool -L "$so" | awk '{print $1}' | grep '@rpath/'); do
+            local ref_name
+            ref_name=$(basename "$ref")
+            # Only rewrite refs to libs we've bundled
+            if [ -f "$dist_dir/lib/$ref_name" ]; then
+                install_name_tool -change "$ref" "@loader_path/$ref_name" "$so" 2>/dev/null || true
+            fi
+        done
+    done
+
+    # Also fix the main binary
+    for ref in $(otool -L "$dist_dir/jami-bridge" | awk '{print $1}' | grep '@rpath/'); do
+        local ref_name
+        ref_name=$(basename "$ref")
+        if [ -f "$dist_dir/lib/$ref_name" ]; then
+            install_name_tool -change "$ref" "@loader_path/$ref_name" "$dist_dir/jami-bridge" 2>/dev/null || true
+        fi
+    done
+
+    # Create symlinks for versioned libs (libfoo.1.dylib → libfoo.dylib)
+    cd "$dist_dir/lib"
+    for dylib in *.dylib.*; do
+        [ -e "$dylib" ] || continue
+        [ -L "$dylib" ] && continue
+        # e.g. libfoo.1.2.3.dylib → libfoo.1.dylib
+        local base
+        base=$(echo "$dylib" | sed -E 's/\.[0-9]+\.dylib$/.dylib/')
+        [ "$base" != "$dylib" ] && [ ! -e "$base" ] && ln -sf "$dylib" "$base" 2>/dev/null || true
+    done
+
+    # Verify
+    echo "=== Verifying library resolution ==="
+    DYLD_LIBRARY_PATH="$dist_dir/lib" otool -L "$dist_dir/jami-bridge" | grep -v '/usr/lib\|/System\|@loader_path' | head -5 || true
+    echo "Done."
+}
+
+native_dist_linux() {
+    local dist_dir="$1"
+    echo "=== Bundling libraries (Linux — ldd/patchelf) ==="
+
+    # Copy libjami from wherever it was found
+    # (first check if it's already in lib/ or in the build dir)
+    local jami_lib
+    jami_lib=$(ldd "$dist_dir/jami-bridge" 2>/dev/null | grep libjami | awk '{print $3}' | head -1)
+    if [ -n "$jami_lib" ] && [ -f "$jami_lib" ]; then
+        cp -L "$jami_lib" "$dist_dir/lib/" && echo "  copied: $(basename $jami_lib)"
+    fi
+
+    # Bundle ALL non-glibc shared libraries (iterative)
+    changed=1
+    while [ "$changed" -ne 0 ]; do
+        changed=0
+        for lib_path in $(
+            LD_LIBRARY_PATH="$dist_dir/lib" ldd "$dist_dir/jami-bridge" "$dist_dir"/lib/*.so.* 2>/dev/null \
+            | grep -oP '/[^\s:]+' \
+            | sort -u
+        ); do
+            lib_name=$(basename "$lib_path")
+            case "$lib_name" in
+                ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*)
+                    continue ;;
+            esac
+            [ -f "$dist_dir/lib/$lib_name" ] && continue
+            case "$lib_name" in *.so*) ;; *) continue ;; esac
+            cp -L "$lib_path" "$dist_dir/lib/$lib_name" && echo "  bundled: $lib_name" && changed=1 || echo "  FAILED: $lib_name"
+        done
+    done
+
+    # Patch RUNPATH on all bundled libs
+    echo "=== Patching RUNPATH ==="
+    for so in "$dist_dir/lib"/*.so*; do
+        [ -L "$so" ] && continue
+        patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
+    done
+
+    # Create symlinks for versioned libs
+    cd "$dist_dir/lib"
+    for so in *.so.*.*; do
+        [ -L "$so" ] && continue
+        major="${so%.so.*}.so.$(echo "$so" | sed 's/.*\.so\.//; s/\..*//')"
+        [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null
+    done
+    for so in *.so.*; do
+        [ -L "$so" ] && continue
+        base="${so%.so.*}.so"
+        [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" 2>/dev/null || true
+    done
+
+    # Verify
+    echo "=== Verifying library resolution ==="
+    LD_LIBRARY_PATH="$dist_dir/lib" ldd "$dist_dir/jami-bridge" | grep "not found" && echo "ERROR: Missing libs!" && exit 1 || echo "All libs resolved."
+}
 
 build_base() {
     echo "=== Building base image (daemon from source in library mode) ==="
@@ -500,9 +724,21 @@ case "${1:-help}" in
         clean_all
         ;;
 
+    # Native build (no containers — for macOS or host with libjami)
+    native)
+        native_build
+        ;;
+    native-dist)
+        native_dist
+        ;;
+
     # Help
     help|*)
         echo "jami-bridge build script"
+        echo ""
+        echo "Native builds (no containers — for macOS or host with libjami):"
+        echo "  native        Build bridge on host (cmake + make)"
+        echo "  native-dist   Bundle bridge + libs into dist tarball"
         echo ""
         echo "Production builds (full image rebuild, slow):"
         echo "  base          Build base image (daemon from source, ~10-20min)"

@@ -7,7 +7,7 @@
 >
 > Built with [pi.dev](https://pi.dev) and **GLM-5.1**.
 
-Runs the Jami daemon in-process (`libjami.so`, library mode — same approach as
+Runs the Jami daemon in-process (`libjami.so`/`libjami.dylib`, library mode — same approach as
 Android/iOS/Windows clients, no DBus required) and exposes it through three interfaces:
 
 | Mode | Use case |
@@ -18,16 +18,20 @@ Android/iOS/Windows clients, no DBus required) and exposes it through three inte
 | **Hook** | Event-driven scripting — run any command on events |
 
 ```
-jami-bridge/              ← the binary (3.2 MB)
-lib/                   ← 4 bundled libraries (240 MB)
-  ├── libjami.so.16.0.0      Jami daemon
-  ├── libgit2.so.1.9.2       Git repository support
-  ├── libsecp256k1.so.5.0.0  Crypto (elliptic curves)
-  └── libllhttp.so.9.3.1     HTTP parser
+jami-bridge/              ← the binary (~3.5 MB)
+lib/                   ← 70+ bundled libraries (~270 MB)
+  ├── libjami.so.16.0.0       Jami daemon
+  ├── libgit2.so.1.9.2        Git repository support
+  ├── libsecp256k1.so.5.0.0   Crypto (elliptic curves)
+  ├── libllhttp.so.9.3.1      HTTP parser
+  ├── libgnutls.so.30         TLS
+  ├── libopus.so.0            Audio codec
+  └── ... (all non-glibc runtime dependencies)
 ```
 
 No host packages needed — all non-glibc dependencies are bundled.
-Works out of the box on any Linux with glibc 2.35+ (Fedora 38+, Ubuntu 22.04+, Debian 12+, RHEL 9+).
+Works out of the box on any Linux with glibc 2.35+ (Fedora 38+, Ubuntu 22.04+, Debian 12+, RHEL 9+)
+and macOS (Homebrew).
 Just extract and run.
 
 ---
@@ -63,8 +67,9 @@ curl -4 http://127.0.0.1:8090/api/ping
 open http://127.0.0.1:8090/
 ```
 
-No `LD_LIBRARY_PATH`, no wrapper script — the binary has `$ORIGIN/lib` RPATH
-baked in, so it automatically finds `./lib/` next to itself.
+No `LD_LIBRARY_PATH`, no wrapper script — on Linux the binary has `$ORIGIN/lib`
+RPATH baked in, on macOS it uses `@loader_path/lib` install names, so the binary
+automatically finds `./lib/` next to itself.
 
 ### Shutdown
 
@@ -528,7 +533,8 @@ See [examples/pi-bot/README.md](examples/pi-bot/README.md) for full details.
 
 ## Building
 
-All compilation happens inside Podman containers — **nothing is built on the host**.
+All compilation happens inside Podman containers on Linux — **nothing is built on the host**.
+On macOS, use `./build.sh native` to build directly on the host.
 
 ### Prerequisites
 
@@ -536,6 +542,21 @@ All compilation happens inside Podman containers — **nothing is built on the h
 - ~5 GB disk space for the base image
 
 ### Development workflow (recommended)
+
+**Native builds (macOS or any host with libjami):**
+
+```bash
+# Build directly on the host (no containers needed)
+./build.sh native
+
+# Bundle into a dist tarball
+./build.sh native-dist
+```
+
+This works on macOS (with Homebrew-installed libjami) or any Linux host
+that has `libjami`, `cmake`, and a C++17 compiler.
+
+**Container builds (Linux, recommended for dist tarballs):**
 
 The fastest way to iterate on the bridge. Source is mounted from the host,
 so only changed files are recompiled. Uses the existing dev container
@@ -610,25 +631,25 @@ tar xzf jami-bridge-dist.tar.gz
 Produces a self-contained directory:
 
 ```
-jami-bridge-dist/          (243 MB extracted, 92 MB compressed)
-├── jami-bridge            3.2 MB binary (RPATH: $ORIGIN/lib)
+jami-bridge-dist/          (277 MB extracted, 106 MB compressed)
+├── jami-bridge            3.5 MB binary (RPATH: $ORIGIN/lib)
 └── lib/
     ├── libjami.so.16.0.0       237 MB  Jami daemon
     ├── libgit2.so.1.9.2         1.3 MB  Git support
     ├── libsecp256k1.so.5.0.0    1.3 MB  Crypto
-    └── libllhttp.so.9.3.1        80 KB  HTTP parser
+    ├── libllhttp.so.9.3.1        80 KB  HTTP parser
+    ├── libgnutls.so.30           2.7 MB  TLS
+    └── ... (70+ more bundled libs)
 ```
 
 ### How the RPATH works
 
-The binary has `$ORIGIN/lib` embedded in its ELF `RUNPATH`. When the dynamic
-linker loads the binary, `$ORIGIN` resolves to the directory containing the
-binary, so `./lib/` is searched automatically.
+The binary has `$ORIGIN/lib` (Linux) or `@loader_path/lib` (macOS) embedded in its
+RUNPATH/install names. When the dynamic linker loads the binary, it resolves
+relative to the binary's location, so `./lib/` is searched automatically.
 
-Transitive dependencies also work: each `.so` file in `lib/` has `$ORIGIN`
-set as its RUNPATH (via `patchelf`), so `libgit2.so` finds `libllhttp.so`
-in the same directory. This is necessary because modern glibc's `RUNPATH`
-does **not** cascade to transitive dependencies.
+Transitive dependencies also work: each library in `lib/` has its own
+RUNPATH/install names patched to find neighbors in the same directory.
 
 Result: **just extract the tarball and run** — no environment variables,
 no wrapper scripts, no system package installs — all non-glibc libs are bundled.
@@ -667,11 +688,10 @@ no wrapper scripts, no system package installs — all non-glibc libs are bundle
 └──────────────────────────────────────────────────────┘
 ```
 
-- **Single process** — the Jami daemon runs in-process via `libjami.so` (same
-  architecture as Android/iOS/Windows clients)
+- **Single process** — the Jami daemon runs in-process via `libjami.so` (Linux)
+  or `libjami.dylib` (macOS) (same architecture as Android/iOS/Windows clients)
 - **No DBus** — library mode, not the DBus interface used by the Linux desktop app
-- **Cross-platform** — C++17, no platform-specific code except `httplib.h`
-  which handles Windows/Unix differences
+- **Cross-platform** — C++17, POSIX APIs for hook, platform-abstracted RPATH.
 
 ---
 
@@ -688,7 +708,7 @@ Change with `--port`:
 
 ## Troubleshooting
 
-### "libjami.so.16: cannot open shared object file"
+### "libjami.so.16: cannot open shared object file" (Linux)
 
 The `lib/` directory must be next to the binary:
 ```
@@ -705,9 +725,17 @@ readelf -d jami-bridge | grep RPATH
 # Should show: $ORIGIN/lib
 ```
 
-### "error while loading shared libraries: libllhttp.so.9.3"
+### "dyld: Library not loaded" (macOS)
 
-All four `.so` files must be in `lib/`, including symlinks. Verify:
+The `lib/` directory must be next to the binary. Verify install names:
+```bash
+otool -L jami-bridge | head -5
+# Should show: @loader_path/lib/...
+```
+
+### "error while loading shared libraries" (Linux)
+
+All bundled `.so` files must be in `lib/`, including symlinks. Verify:
 ```bash
 ldd jami-bridge | grep "not found"
 # Should show nothing
