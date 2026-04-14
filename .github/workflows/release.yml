@@ -1,0 +1,515 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g. v0.3.0)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Stage 1: Build libjami (Linux) ─────────────────────────────────
+
+  build-libjami-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-linux-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Install build dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson ninja-build cmake g++ git pkg-config \
+            make autoconf automake libtool yasm nasm \
+            patch wget file \
+            gettext \
+            libboost-dev \
+            libgnutls28-dev nettle-dev libopus-dev libspeexdsp-dev \
+            libyaml-cpp-dev libjsoncpp-dev libfmt-dev \
+            uuid-dev libargon2-dev libarchive-dev \
+            libssl-dev \
+            libpulse-dev libasound2-dev \
+            libva-dev libvdpau-dev libgl-dev \
+            libx11-dev libxext-dev libxfixes-dev \
+            libpipewire-0.3-dev libgit2-dev libsecp256k1-dev \
+            libexpat1-dev libpcre2-dev \
+            libsystemd-dev libmsgpack-cxx-dev libsqlite3-dev \
+            nlohmann-json3-dev libhttp-parser-dev libudev-dev
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          make -j$(nproc)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          export CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX
+          export LD_LIBRARY_PATH=$CONTRIB_PREFIX/lib
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          ninja -C build-lib install
+
+  # ── Stage 1: Build libjami (macOS ARM64) ───────────────────────────
+
+  build-libjami-macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-arm64-${{ steps.daemon.outputs.sha }}
+
+      - name: Apply daemon patches
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon
+          sed -i '' "s/corelayer\.cpp'/corelayer.mm'/" src/meson.build
+          sed -i '' 's/--with-gnutls=yes/--with-gnutls=\/opt\/homebrew/' contrib/src/pjproject/rules.mak
+
+      - name: Install Homebrew dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          brew install \
+            meson ninja cmake pkg-config \
+            autoconf automake libtool yasm nasm \
+            gettext boost \
+            gnutls nettle opus speexdsp \
+            yaml-cpp jsoncpp fmt \
+            argon2 libarchive \
+            openssl \
+            libgit2 secp256k1 \
+            msgpack-cxx sqlite nlohmann-json
+          brew link --force gettext
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+          export CPPFLAGS="-I/opt/homebrew/include"
+          export LDFLAGS="-L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX:/opt/homebrew
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export LDFLAGS="-L$CONTRIB_PREFIX/lib -L/opt/homebrew/lib -framework CoreAudio -framework AudioToolbox -framework CoreServices -framework Security -framework Foundation -lresolv"
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          sudo ninja -C build-lib install
+
+  # ── Stage 1: Build libjami (macOS x86_64) ───────────────────────────
+
+  build-libjami-macos-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Apply daemon patches
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon
+          sed -i '' "s/corelayer\.cpp'/corelayer.mm'/" src/meson.build
+          sed -i '' 's/--with-gnutls=yes/--with-gnutls=\/usr\/local/' contrib/src/pjproject/rules.mak
+
+      - name: Install Homebrew dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          brew install \
+            meson ninja cmake pkg-config \
+            autoconf automake libtool yasm nasm \
+            gettext boost \
+            gnutls nettle opus speexdsp \
+            yaml-cpp jsoncpp fmt \
+            argon2 libarchive \
+            openssl \
+            libgit2 secp256k1 \
+            msgpack-cxx sqlite nlohmann-json
+          brew link --force gettext
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+          export CPPFLAGS="-I/opt/homebrew/include"
+          export LDFLAGS="-L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX:/opt/homebrew
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export LDFLAGS="-L$CONTRIB_PREFIX/lib -L/opt/homebrew/lib -framework CoreAudio -framework AudioToolbox -framework CoreServices -framework Security -framework Foundation -lresolv"
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          sudo ninja -C build-lib install
+
+  # ── Stage 2: Build bridge + bundle dist (Linux) ────────────────────
+
+  build-bridge-linux:
+    needs: build-libjami-linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore libjami SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-linux-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Install bridge build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ make patchelf pkg-config nlohmann-json3-dev libhttp-parser-dev \
+            libpulse-dev libspeexdsp-dev \
+            libgit2-dev libsecp256k1-dev \
+            libva-dev libvdpau-dev libgl-dev \
+            libx11-dev libxext-dev libxfixes-dev \
+            libpipewire-0.3-dev \
+            libyaml-cpp-dev libjsoncpp-dev libfmt-dev \
+            libgnutls28-dev nettle-dev libopus-dev \
+            libargon2-dev libarchive-dev libssl-dev \
+            uuid-dev libudev-dev libasound2-dev
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami.so*' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          export LD_LIBRARY_PATH=$JAMI_LIB_DIR
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR"
+          make -j$(nproc)
+
+      - name: Create dist bundle
+        run: |
+          REPO_DIR=$PWD
+          dist_dir=jami-bridge-dist
+          mkdir -p "$dist_dir/lib"
+
+          cp build/jami-bridge "$dist_dir/"
+          chmod +x "$dist_dir/jami-bridge"
+
+          for f in $(find /opt/jami-sdk -name 'libjami.so*'); do
+            [ -f "$f" ] && cp -L "$f" "$dist_dir/lib/" 2>/dev/null || true
+          done
+
+          changed=1
+          while [ "$changed" -ne 0 ]; do
+            changed=0
+            for lib_path in $(
+              LD_LIBRARY_PATH="$PWD/$dist_dir/lib" ldd "$PWD/$dist_dir/jami-bridge" "$PWD/$dist_dir"/lib/*.so.* 2>/dev/null \
+                | grep -oP '/[^\s:]+' | sort -u
+            ); do
+              lib_name=$(basename "$lib_path")
+              case "$lib_name" in
+                ld-linux-x86-64.so.*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|linux-vdso.so.*)
+                  continue ;;
+              esac
+              [ -f "$PWD/$dist_dir/lib/$lib_name" ] && continue
+              case "$lib_name" in *.so*) ;; *) continue ;; esac
+              cp -L "$lib_path" "$PWD/$dist_dir/lib/$lib_name" && changed=1
+            done
+          done
+
+          for so in "$dist_dir"/lib/*.so*; do
+            [ -L "$so" ] && continue
+            patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
+          done
+
+          cd "$dist_dir/lib"
+          for so in *.so.*.*; do
+            [ -L "$so" ] && continue
+            major="${so%.so.*}.so.$(echo "$so" | sed 's/.*\.so\.//; s/\..*//')"
+            [ "$major" != "$so" ] && ln -sf "$so" "$major" 2>/dev/null || true
+          done
+          for so in *.so.*; do
+            [ -L "$so" ] && continue
+            base="${so%.so.*}.so"
+            [ ! -L "$base" ] && [ ! -e "$base" ] && ln -sf "$so" "$base" || true
+          done
+          cd "$REPO_DIR"
+
+          LD_LIBRARY_PATH="$PWD/$dist_dir/lib" ldd "$PWD/$dist_dir/jami-bridge" | grep "not found" && exit 1 || true
+
+          tar czf jami-bridge-linux-x86_64.tar.gz jami-bridge-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jami-bridge-linux-x86_64
+          path: jami-bridge-linux-x86_64.tar.gz
+
+  # ── Stage 2: Build bridge (macOS ARM64) ────────────────────────────
+
+  build-bridge-macos-arm64:
+    needs: build-libjami-macos-arm64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore libjami SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-arm64-${{ steps.daemon.outputs.sha }}
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami*.dylib' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_PREFIX_PATH=/opt/homebrew \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR -L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Create dist bundle
+        run: |
+          dist_dir=jami-bridge-dist
+          mkdir -p "$dist_dir/lib"
+
+          cp build/jami-bridge "$dist_dir/"
+          chmod +x "$dist_dir/jami-bridge"
+
+          for f in $(find /opt/jami-sdk -name 'libjami*.dylib'); do
+            cp -L "$f" "$dist_dir/lib/" 2>/dev/null || true
+          done
+
+          changed=1
+          while [ "$changed" -ne 0 ]; do
+            changed=0
+            for bin in "$dist_dir/jami-bridge" "$dist_dir"/lib/*.dylib; do
+              [ -f "$bin" ] || continue
+              for dep in $(otool -L "$bin" | grep -oE '/(opt/homebrew|/opt/homebrew)/[^ ]+' | sort -u); do
+                lib_name=$(basename "$dep")
+                [ -f "$dist_dir/lib/$lib_name" ] && continue
+                cp -L "$dep" "$dist_dir/lib/$lib_name" 2>/dev/null && changed=1 || true
+              done
+            done
+          done
+
+          for bin in "$dist_dir/jami-bridge" "$dist_dir"/lib/*.dylib; do
+            [ -f "$bin" ] || continue
+            lib_name=$(basename "$bin")
+            install_name_tool -id "@executable_path/lib/$lib_name" "$bin" 2>/dev/null || true
+            for dep in $(otool -L "$bin" | grep -oE '/(opt/homebrew|/opt/homebrew)/[^ ]+' | sort -u); do
+              dep_name=$(basename "$dep")
+              install_name_tool -change "$dep" "@executable_path/lib/$dep_name" "$bin" 2>/dev/null || true
+            done
+            install_name_tool -add_rpath "@executable_path/lib" "$bin" 2>/dev/null || true
+          done
+
+          "$dist_dir/jami-bridge" --help 2>&1 | head -1 || true
+
+          tar czf jami-bridge-macos-arm64.tar.gz jami-bridge-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jami-bridge-macos-arm64
+          path: jami-bridge-macos-arm64.tar.gz
+
+  # ── Stage 2: Build bridge (macOS x86_64) ───────────────────────────
+
+  build-bridge-macos-x86_64:
+    needs: build-libjami-macos-x86_64
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore libjami SDK
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami*.dylib' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_PREFIX_PATH=/opt/homebrew \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR -L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Create dist bundle
+        run: |
+          dist_dir=jami-bridge-dist
+          mkdir -p "$dist_dir/lib"
+
+          cp build/jami-bridge "$dist_dir/"
+          chmod +x "$dist_dir/jami-bridge"
+
+          for f in $(find /opt/jami-sdk -name 'libjami*.dylib'); do
+            cp -L "$f" "$dist_dir/lib/" 2>/dev/null || true
+          done
+
+          changed=1
+          while [ "$changed" -ne 0 ]; do
+            changed=0
+            for bin in "$dist_dir/jami-bridge" "$dist_dir"/lib/*.dylib; do
+              [ -f "$bin" ] || continue
+              for dep in $(otool -L "$bin" | grep -oE '/(opt/homebrew|/opt/homebrew)/[^ ]+' | sort -u); do
+                lib_name=$(basename "$dep")
+                [ -f "$dist_dir/lib/$lib_name" ] && continue
+                cp -L "$dep" "$dist_dir/lib/$lib_name" 2>/dev/null && changed=1 || true
+              done
+            done
+          done
+
+          for bin in "$dist_dir/jami-bridge" "$dist_dir"/lib/*.dylib; do
+            [ -f "$bin" ] || continue
+            lib_name=$(basename "$bin")
+            install_name_tool -id "@executable_path/lib/$lib_name" "$bin" 2>/dev/null || true
+            for dep in $(otool -L "$bin" | grep -oE '/(opt/homebrew|/opt/homebrew)/[^ ]+' | sort -u); do
+              dep_name=$(basename "$dep")
+              install_name_tool -change "$dep" "@executable_path/lib/$dep_name" "$bin" 2>/dev/null || true
+            done
+            install_name_tool -add_rpath "@executable_path/lib" "$bin" 2>/dev/null || true
+          done
+
+          "$dist_dir/jami-bridge" --help 2>&1 | head -1 || true
+
+          tar czf jami-bridge-macos-x86_64.tar.gz jami-bridge-dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jami-bridge-macos-x86_64
+          path: jami-bridge-macos-x86_64.tar.gz
+
+  # ── Stage 3: Create GitHub Release ─────────────────────────────────
+
+  release:
+    needs: [build-bridge-linux, build-bridge-macos-arm64, build-bridge-macos-x86_64]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "tag=${{ github.event.inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          generate_release_notes: true
+          files: |
+            artifacts/jami-bridge-linux-x86_64/*.tar.gz
+            artifacts/jami-bridge-macos-arm64/*.tar.gz
+            artifacts/jami-bridge-macos-x86_64/*.tar.gz

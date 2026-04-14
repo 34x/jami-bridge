@@ -5,6 +5,9 @@ dev-dist/
 jami-bridge-dist-output/
 jami-bridge-dist/
 
+# Dev test containers
+Containerfile.ubuntu-test
+
 # Compiled objects
 *.o
 *.so

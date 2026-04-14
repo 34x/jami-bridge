@@ -94,9 +94,24 @@ target_include_directories(jami-bridge PRIVATE
     ${JAMI_INCLUDE_DIR}
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/vendor
+    $<$<PLATFORM_ID:Darwin>:/opt/homebrew/include>
 )
 
 target_link_libraries(jami-bridge PRIVATE ${JAMI_LIBRARY})
+
+# libjami has unresolved symbols from its transitive dependencies
+# (pulseaudio, speexdsp, etc.) that must be linked explicitly.
+# On dist-packaged builds these are already in the link path, but
+# on clean systems (CI, minimal installs) the linker needs them.
+if(NOT APPLE AND NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(JAMI_DEPS IMPORTED_TARGET
+        libpulse
+        speexdsp)
+    if(JAMI_DEPS_FOUND)
+        target_link_libraries(jami-bridge PRIVATE PkgConfig::JAMI_DEPS)
+    endif()
+endif()
 
 # Platform-specific libraries and settings
 if(WIN32)

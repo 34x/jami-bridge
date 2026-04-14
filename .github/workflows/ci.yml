@@ -1,0 +1,280 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-linux-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Install build dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            meson ninja-build cmake g++ git pkg-config \
+            make autoconf automake libtool yasm nasm \
+            patch wget file \
+            gettext \
+            libboost-dev \
+            libgnutls28-dev nettle-dev libopus-dev libspeexdsp-dev \
+            libyaml-cpp-dev libjsoncpp-dev libfmt-dev \
+            uuid-dev libargon2-dev libarchive-dev \
+            libssl-dev \
+            libpulse-dev libasound2-dev \
+            libva-dev libvdpau-dev libgl-dev \
+            libx11-dev libxext-dev libxfixes-dev \
+            libpipewire-0.3-dev libgit2-dev libsecp256k1-dev \
+            libexpat1-dev libpcre2-dev \
+            libsystemd-dev libmsgpack-cxx-dev libsqlite3-dev \
+            nlohmann-json3-dev libhttp-parser-dev libudev-dev
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          make -j$(nproc)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          export CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX
+          export LD_LIBRARY_PATH=$CONTRIB_PREFIX/lib
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          ninja -C build-lib install
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami.so*' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          export LD_LIBRARY_PATH=$JAMI_LIB_DIR
+          sudo apt-get install -y cmake g++ make pkg-config nlohmann-json3-dev libhttp-parser-dev \
+            libpulse-dev libspeexdsp-dev \
+            libgit2-dev libsecp256k1-dev \
+            libva-dev libvdpau-dev libgl-dev \
+            libx11-dev libxext-dev libxfixes-dev \
+            libpipewire-0.3-dev \
+            libyaml-cpp-dev libjsoncpp-dev libfmt-dev \
+            libgnutls28-dev nettle-dev libopus-dev \
+            libargon2-dev libarchive-dev libssl-dev \
+            uuid-dev libudev-dev libasound2-dev
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR"
+          make -j$(nproc)
+
+      - name: Verify binary
+        run: |
+          file build/jami-bridge
+          test -x build/jami-bridge
+
+  build-macos-arm64:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-arm64-${{ steps.daemon.outputs.sha }}
+
+      - name: Apply daemon patches
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon
+          # Fix coreaudio source extension (.cpp → .mm)
+          sed -i '' "s/corelayer\.cpp'/corelayer.mm'/" src/meson.build
+          # Fix pjproject: --with-gnutls=yes creates '-Iyes/include', use Homebrew prefix
+          sed -i '' 's/--with-gnutls=yes/--with-gnutls=\/opt\/homebrew/' contrib/src/pjproject/rules.mak
+
+      - name: Install Homebrew dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          brew install \
+            meson ninja cmake pkg-config \
+            autoconf automake libtool yasm nasm \
+            gettext boost \
+            gnutls nettle opus speexdsp \
+            yaml-cpp jsoncpp fmt \
+            argon2 libarchive \
+            openssl \
+            libgit2 secp256k1 \
+            msgpack-cxx sqlite nlohmann-json
+          brew link --force gettext
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+          export CPPFLAGS="-I/opt/homebrew/include"
+          export LDFLAGS="-L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX:/opt/homebrew
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export LDFLAGS="-L$CONTRIB_PREFIX/lib -L/opt/homebrew/lib -framework CoreAudio -framework AudioToolbox -framework CoreServices -framework Security -framework Foundation -lresolv"
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          sudo ninja -C build-lib install
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami*.dylib' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_PREFIX_PATH=/opt/homebrew \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR -L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Verify binary
+        run: |
+          file build/jami-bridge
+          test -x build/jami-bridge
+
+  build-macos-x86_64:
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Determine daemon SHA
+        id: daemon
+        run: echo "sha=$(cd daemon && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Cache libjami SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: /opt/jami-sdk
+          key: jami-sdk-macos-x86_64-${{ steps.daemon.outputs.sha }}
+
+      - name: Apply daemon patches
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon
+          # Fix coreaudio source extension (.cpp → .mm)
+          sed -i '' "s/corelayer\.cpp'/corelayer.mm'/" src/meson.build
+          # Fix pjproject: --with-gnutls=yes creates '-Iyes/include', use Homebrew prefix
+          sed -i '' 's/--with-gnutls=yes/--with-gnutls=\/usr\/local/' contrib/src/pjproject/rules.mak
+
+      - name: Install Homebrew dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          brew install \
+            meson ninja cmake pkg-config \
+            autoconf automake libtool yasm nasm \
+            gettext boost \
+            gnutls nettle opus speexdsp \
+            yaml-cpp jsoncpp fmt \
+            argon2 libarchive \
+            openssl \
+            libgit2 secp256k1 \
+            msgpack-cxx sqlite nlohmann-json
+          brew link --force gettext
+
+      - name: Build contrib dependencies
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          cd daemon/contrib
+          mkdir -p build && cd build
+          ../bootstrap --disable-downloads=false
+          export PKG_CONFIG_PATH=/opt/homebrew/lib/pkgconfig
+          export CPPFLAGS="-I/opt/homebrew/include"
+          export LDFLAGS="-L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Build libjami
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          CONTRIB_PREFIX=$PWD/daemon/contrib/$(cc -dumpmachine)
+          export PKG_CONFIG_PATH=$CONTRIB_PREFIX/lib/pkgconfig:/opt/homebrew/lib/pkgconfig
+          export CMAKE_PREFIX_PATH=$CONTRIB_PREFIX:/opt/homebrew
+          export C_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export CPLUS_INCLUDE_PATH=$CONTRIB_PREFIX/include:/opt/homebrew/include
+          export LDFLAGS="-L$CONTRIB_PREFIX/lib -L/opt/homebrew/lib -framework CoreAudio -framework AudioToolbox -framework CoreServices -framework Security -framework Foundation -lresolv"
+
+          cd daemon
+          meson setup build-lib \
+            -Dinterfaces=library \
+            -Dplugins=false \
+            --prefix=/opt/jami-sdk
+          ninja -C build-lib
+          sudo ninja -C build-lib install
+
+      - name: Build bridge
+        run: |
+          JAMI_LIB=$(find /opt/jami-sdk -name 'libjami*.dylib' -not -type l | head -1)
+          JAMI_LIB_DIR=$(dirname "$JAMI_LIB")
+          mkdir -p build && cd build
+          cmake .. \
+            -DJAMI_INCLUDE_DIR=/opt/jami-sdk/include \
+            -DJAMI_LIBRARY=$JAMI_LIB \
+            -DCMAKE_PREFIX_PATH=/opt/homebrew \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$JAMI_LIB_DIR -L/opt/homebrew/lib"
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Verify binary
+        run: |
+          file build/jami-bridge
+          test -x build/jami-bridge
